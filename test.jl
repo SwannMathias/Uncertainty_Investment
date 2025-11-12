@@ -22,59 +22,95 @@ end
 
 # Model parameters
 @everywhere struct InvestmentModel
+
+
+    # Paramètres du modèle de profit
+    h::Float64                # Paramètre de la fonction de profit
+    gamma::Float64            # Élasticité de la demande (0 < gamma < 1)
+
+    # Paramètres du processus de demande (GBM avec variance stochastique)
+    mu_X::Float64             # Taux de dérive de X_t
+    sigma_X::Float64          # Volatilité de base de X_t
+    rho::Float64              # Persistance de la variance (processus AR(1))
+    sigma_v::Float64          # Volatilité de la variance
+
+    # Grilles pour les calculs numériques
+    capital_grid::Vector{Float64}
+    investment_grid::Vector{Float64}
+
+    # Autres paramètres existants
     discount_factor::Float64
     depreciation_rate::Float64
     capital_share::Float64
     demand_elasticity::Float64
     investment_cost_param::Float64
-    mean_demand::Float64
-    std_demand::Float64
-    demand_grid::Vector{Float64}
-    capital_grid::Vector{Float64}
-    investment_grid::Vector{Float64}
 end
 
 # Initialize model with default parameters
 function create_model(;
+    h = 1.0,
+    gamma = 0.5,
+    mu_X = 0.01,
+    sigma_X = 0.1,
+    rho = 0.9,
+    sigma_v = 0.01,
     discount_factor = 0.96,
     depreciation_rate = 0.1,
     capital_share = 0.65,
     demand_elasticity = 0.5,
     investment_cost_param = 0.5,
-    mean_demand = 1.0,
-    std_demand = 0.2,
     num_capital_points = 100,
-    num_demand_points = 15,
     num_investment_points = 100
 )
-    # Create grids
+    # Grilles pour le capital et l'investissement
     capital_min, capital_max = 0.1, 5.0
     capital_grid = range(capital_min, capital_max, length=num_capital_points) |> collect
-    
-    demand_min = max(0.1, mean_demand - 3*std_demand)
-    demand_max = mean_demand + 3*std_demand
-    demand_grid = range(demand_min, demand_max, length=num_demand_points) |> collect
-    
+
     investment_min, investment_max = -0.5, 1.5
     investment_grid = range(investment_min, investment_max, length=num_investment_points) |> collect
-    
+
     return InvestmentModel(
-        discount_factor, 
-        depreciation_rate, 
-        capital_share, 
-        demand_elasticity, 
-        investment_cost_param, 
-        mean_demand, 
-        std_demand, 
-        demand_grid, 
-        capital_grid, 
-        investment_grid
+        h,
+        gamma,
+        mu_X,
+        sigma_X,
+        rho,
+        sigma_v,
+        capital_grid,
+        investment_grid,
+        discount_factor,
+        depreciation_rate,
+        capital_share,
+        demand_elasticity,
+        investment_cost_param
     )
 end
 
-# Profit function π(K,D): concave in both arguments
-@everywhere function profit(capital::Float64, demand::Float64, model::InvestmentModel)
-    return demand * capital^model.capital_share - model.demand_elasticity * capital^2
+# Profit function π(K,D): concave in both arguments π(K,D), taken from Optimal Investment with costly reversibility Abel & Eberly (1996)
+@everywhere function profit(capital::Float64, demand_shock::Float64, model::InvestmentModel)
+    return (model.h / (1 - model.gamma)) * (demand_shock^model.gamma) * (capital^(1 - model.gamma))
+end
+
+function simulate_demand_process(model::InvestmentModel, T::Int, dt::Float64)
+    # Initialisation
+    X = zeros(T)
+    sigma_squared = zeros(T)
+    X[1] = 1.0  # Condition initiale pour X_t
+    sigma_squared[1] = model.sigma_X^2  # Condition initiale pour la variance
+
+    # Simulation
+    for t in 2:T
+        # Mise à jour de la variance (processus AR(1))
+        epsilon = rand(Normal(0, model.sigma_v))
+        sigma_squared[t] = model.rho * sigma_squared[t-1] + epsilon
+
+        # Mise à jour de X_t (GBM avec variance stochastique)
+        sigma_t = sqrt(max(sigma_squared[t], 0.0))  # Assure que la variance est positive
+        dz = sqrt(dt) * randn()
+        X[t] = X[t-1] * exp((model.mu_X - 0.5 * sigma_t^2) * dt + sigma_t * dz)
+    end
+
+    return X
 end
 
 # Investment adjustment cost C(I): convex with possible fixed cost
@@ -93,13 +129,6 @@ end
     return (1 - model.depreciation_rate) * capital + investment
 end
 
-# Demand transition (AR(1) process with shock)
-function demand_shock(demand::Float64, model::InvestmentModel, persistence=0.8)
-    distribution = Normal(0, model.std_demand)
-    shock = rand(distribution)
-    next_demand = persistence * demand + (1 - persistence) * model.mean_demand + shock
-    return next_demand
-end
 
 # Compute value for a single state point (parallelizable unit)
 @everywhere function compute_state_value(
