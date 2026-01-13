@@ -1,5 +1,11 @@
 using Test
 using UncertaintyInvestment
+using Random
+
+println("Running tests with $(get_nthreads()) thread(s)")
+if get_nthreads() == 1
+    println("  Tip: Use 'julia -t N' for parallel testing")
+end
 
 @testset "UncertaintyInvestment.jl" begin
     @testset "Parameters" begin
@@ -175,6 +181,23 @@ using UncertaintyInvestment
         @test check_convergence(x_new, x_old; atol=1e-1)
         @test !check_convergence(x_new, x_old; atol=1e-5)
     end
+
+    @testset "Parallelization (Basic)" begin
+        # Basic parallel tests (full tests in test_parallelization.jl)
+        @test get_nthreads() >= 1
+        @test 1 <= get_threadid() <= get_nthreads()
+
+        # Test that parallel flag is accepted
+        params = ModelParameters(
+            numerical = NumericalSettings(n_K=10, n_D=3, n_sigma=3, max_iter=20, tol_vfi=1e-3)
+        )
+        sol = solve_model(params; ac=NoAdjustmentCost(), verbose=false, use_parallel=true)
+        @test sol.convergence.converged
+        @test sol.convergence.threads_used >= 1
+    end
 end
 
-println("\n✓ All tests passed!")
+# Include comprehensive parallelization tests
+include("test_parallelization.jl")
+
+println("\n All tests passed!")

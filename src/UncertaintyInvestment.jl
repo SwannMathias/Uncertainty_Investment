@@ -43,6 +43,9 @@ using JLD2
 using ProgressMeter
 using Printf
 
+# Threading support (Julia Base)
+using Base.Threads: @threads, nthreads, threadid
+
 # ============================================================================
 # Model primitives
 # ============================================================================
@@ -91,11 +94,13 @@ include("solution/bellman.jl")
 export solve_midyear_problem, compute_midyear_continuation
 export solve_beginning_year_problem, bellman_operator!
 export bellman_operator_no_ac!, howard_improvement_step!
+export bellman_operator_parallel!, howard_improvement_step_parallel!
 
 include("solution/vfi.jl")
 export SolvedModel, value_function_iteration, solve_model
 export solution_diagnostics, print_solution_diagnostics
 export evaluate_value, evaluate_policy, compute_stationary_distribution
+export get_nthreads, get_threadid  # Threading utilities
 
 # ============================================================================
 # Simulation
@@ -103,11 +108,13 @@ export evaluate_value, evaluate_policy, compute_stationary_distribution
 
 include("simulation/simulate_shocks.jl")
 export ShockPanel, simulate_ar1_path, simulate_sv_path
-export generate_shock_panel, get_firm_shocks, get_firm_shocks_level
+export generate_shock_panel, generate_shock_panel_parallel
+export get_firm_shocks, get_firm_shocks_level
 export shock_statistics, print_shock_statistics
 
 include("simulation/simulate_firms.jl")
 export FirmHistory, simulate_firm, simulate_firm_panel
+export simulate_firm_panel_parallel
 
 include("simulation/panel.jl")
 export FirmPanel, construct_estimation_panel

@@ -26,6 +26,10 @@ using Printf
 println("="^70)
 println("Uncertainty Investment Model - Baseline Solution")
 println("="^70)
+println("Threads available: $(get_nthreads())")
+if get_nthreads() == 1
+    println("  Tip: Use 'julia -t N' for N threads to enable parallelization")
+end
 
 # ============================================================================
 # 1. Define Parameters
