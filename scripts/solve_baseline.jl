@@ -9,9 +9,19 @@ This script demonstrates:
 """
 
 using Pkg
-Pkg.activate(".")
+# Activate the project environment (locate project root from script location)
+project_root = dirname(@__DIR__)
+Pkg.activate(project_root)
+
+# Install dependencies if not already installed
+if !isfile(joinpath(project_root, "Manifest.toml"))
+    println("Installing package dependencies...")
+    Pkg.instantiate()
+end
+
 using UncertaintyInvestment
 using Random
+using Printf
 
 println("="^70)
 println("Uncertainty Investment Model - Baseline Solution")
