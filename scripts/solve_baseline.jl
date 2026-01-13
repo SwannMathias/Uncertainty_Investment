@@ -9,9 +9,18 @@ This script demonstrates:
 """
 
 using Pkg
-Pkg.activate(".")
-using UncertaintyInvestment
+
+# Get the package root directory (parent of scripts/)
+package_root = dirname(@__DIR__)
+
+# Activate the package environment
+Pkg.activate(package_root)
+
+# Directly include the local module
+include(joinpath(package_root, "src", "UncertaintyInvestment.jl"))
+using .UncertaintyInvestment
 using Random
+using Printf
 
 println("="^70)
 println("Uncertainty Investment Model - Baseline Solution")

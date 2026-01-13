@@ -133,6 +133,53 @@ println("  Value: $V_val")
 println("  Optimal investment: $I_opt")
 ```
 
+## Running Scripts
+
+The `scripts/` directory contains ready-to-run examples for solving models, simulating data, and performing analysis.
+
+### Running solve_baseline.jl
+
+This script solves the model with different adjustment cost specifications and saves results:
+
+```bash
+# From the repository root directory
+cd /path/to/Uncertainty_Investment
+
+# Run the baseline solver
+julia scripts/solve_baseline.jl
+```
+
+The script will:
+1. Set up model parameters
+2. Solve the model with 4 different adjustment cost specifications:
+   - No adjustment costs (baseline)
+   - Convex adjustment costs
+   - Fixed adjustment costs
+   - Composite (fixed + convex) costs
+3. Compare solutions across specifications
+4. Save results to `output/solutions/`
+5. Export CSV files for analysis
+
+**Output locations:**
+- Solutions: `output/solutions/*.jld2`
+- CSV exports: `output/solutions/*/`
+
+### Prerequisites
+
+Make sure all dependencies are installed:
+
+```bash
+# From the repository root
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+```
+
+This will install all required packages listed in `Project.toml`.
+
+### Other Scripts
+
+- `run_simulation.jl`: Generate simulated firm panel data (coming soon)
+- `comparative_statics.jl`: Parameter sensitivity analysis (coming soon)
+
 ## Model Specification
 
 ### Timeline Within Year t
