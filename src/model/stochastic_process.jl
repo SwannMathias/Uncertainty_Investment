@@ -11,43 +11,43 @@ using LinearAlgebra
 using Distributions
 
 """
-    rouwenhorst(n::Int, ρ::Float64, σ::Float64; μ::Float64=0.0)
+    rouwenhorst(n::Int, rho::Float64, sigma::Float64; mu::Float64=0.0)
 
 Discretize AR(1) process using Rouwenhorst method (preferred for persistent processes).
 
-Process: x' = μ(1-ρ) + ρx + σε, ε ~ N(0,1)
+Process: x' = mu(1-rho) + rho*x + sigma*epsilon, epsilon ~ N(0,1)
 
 # Arguments
 - `n`: Number of grid points
-- `ρ`: Persistence parameter
-- `σ`: Standard deviation of innovations
-- `μ`: Long-run mean (default: 0.0)
+- `rho`: Persistence parameter
+- `sigma`: Standard deviation of innovations
+- `mu`: Long-run mean (default: 0.0)
 
 # Returns
 - `grid`: Vector of n grid points
-- `Pi`: n×n transition probability matrix
+- `Pi`: nxn transition probability matrix
 
 # References
 Kopecky & Suen (2010), "Finite State Markov-Chain Approximations to Highly Persistent Processes"
 """
-function rouwenhorst(n::Int, ρ::Float64, σ::Float64; μ::Float64=0.0)
+function rouwenhorst(n::Int, rho::Float64, sigma::Float64; mu::Float64=0.0)
     @assert n >= 2 "Need at least 2 grid points"
-    @assert 0.0 <= ρ < 1.0 "ρ must be in [0, 1)"
-    @assert σ > 0.0 "σ must be positive"
+    @assert 0.0 <= rho < 1.0 "rho must be in [0, 1)"
+    @assert sigma > 0.0 "sigma must be positive"
 
     # Step 1: Compute unconditional variance
-    sigma_x = σ / sqrt(1 - ρ^2)
+    sigma_x = sigma / sqrt(1 - rho^2)
 
     # Step 2: Construct symmetric grid around zero
-    ψ = sqrt(n - 1) * sigma_x
-    grid_centered = range(-ψ, ψ, length=n)
+    psi = sqrt(n - 1) * sigma_x
+    grid_centered = range(-psi, psi, length=n)
 
     # Step 3: Build transition matrix recursively
-    p = (1 + ρ) / 2
+    p = (1 + rho) / 2
     Pi = rouwenhorst_matrix(n, p)
 
-    # Step 4: Shift grid to have mean μ
-    grid = collect(grid_centered) .+ μ
+    # Step 4: Shift grid to have mean mu
+    grid = collect(grid_centered) .+ mu
 
     return grid, Pi
 end
@@ -63,7 +63,7 @@ function rouwenhorst_matrix(n::Int, p::Float64)
     else
         Pi_nm1 = rouwenhorst_matrix(n-1, p)
 
-        # Build n×n matrix from (n-1)×(n-1) matrix
+        # Build nxn matrix from (n-1)x(n-1) matrix
         Pi = zeros(n, n)
 
         Pi[1:n-1, 1:n-1] .+= p .* Pi_nm1
@@ -79,40 +79,40 @@ function rouwenhorst_matrix(n::Int, p::Float64)
 end
 
 """
-    tauchen(n::Int, ρ::Float64, σ::Float64; μ::Float64=0.0, n_std::Float64=3.0)
+    tauchen(n::Int, rho::Float64, sigma::Float64; mu::Float64=0.0, n_std::Float64=3.0)
 
 Discretize AR(1) process using Tauchen method.
 
-Process: x' = μ(1-ρ) + ρx + σε, ε ~ N(0,1)
+Process: x' = mu(1-rho) + rho*x + sigma*epsilon, epsilon ~ N(0,1)
 
 # Arguments
 - `n`: Number of grid points
-- `ρ`: Persistence parameter
-- `σ`: Standard deviation of innovations
-- `μ`: Long-run mean (default: 0.0)
+- `rho`: Persistence parameter
+- `sigma`: Standard deviation of innovations
+- `mu`: Long-run mean (default: 0.0)
 - `n_std`: Number of standard deviations for grid bounds (default: 3.0)
 
 # Returns
 - `grid`: Vector of n grid points
-- `Pi`: n×n transition probability matrix
+- `Pi`: nxn transition probability matrix
 
 # References
 Tauchen (1986), "Finite State Markov-Chain Approximations to Univariate and Vector Autoregressions"
 """
-function tauchen(n::Int, ρ::Float64, σ::Float64; μ::Float64=0.0, n_std::Float64=3.0)
+function tauchen(n::Int, rho::Float64, sigma::Float64; mu::Float64=0.0, n_std::Float64=3.0)
     @assert n >= 2 "Need at least 2 grid points"
-    @assert 0.0 <= ρ < 1.0 "ρ must be in [0, 1)"
-    @assert σ > 0.0 "σ must be positive"
+    @assert 0.0 <= rho < 1.0 "rho must be in [0, 1)"
+    @assert sigma > 0.0 "sigma must be positive"
     @assert n_std > 0.0 "n_std must be positive"
 
     # Unconditional variance
-    sigma_x = σ / sqrt(1 - ρ^2)
+    sigma_x = sigma / sqrt(1 - rho^2)
 
     # Construct grid
     x_max = n_std * sigma_x
     x_min = -x_max
     grid_centered = range(x_min, x_max, length=n)
-    grid = collect(grid_centered) .+ μ
+    grid = collect(grid_centered) .+ mu
 
     # Step size
     step = (x_max - x_min) / (n - 1)
@@ -125,16 +125,16 @@ function tauchen(n::Int, ρ::Float64, σ::Float64; μ::Float64=0.0, n_std::Float
         for j in 1:n
             if j == 1
                 # Lower bound
-                threshold = (grid_centered[1] - ρ * grid_centered[i] + step/2) / σ
+                threshold = (grid_centered[1] - rho * grid_centered[i] + step/2) / sigma
                 Pi[i, j] = cdf(d, threshold)
             elseif j == n
                 # Upper bound
-                threshold = (grid_centered[n] - ρ * grid_centered[i] - step/2) / σ
+                threshold = (grid_centered[n] - rho * grid_centered[i] - step/2) / sigma
                 Pi[i, j] = 1 - cdf(d, threshold)
             else
                 # Interior points
-                threshold_upper = (grid_centered[j] - ρ * grid_centered[i] + step/2) / σ
-                threshold_lower = (grid_centered[j] - ρ * grid_centered[i] - step/2) / σ
+                threshold_upper = (grid_centered[j] - rho * grid_centered[i] + step/2) / sigma
+                threshold_lower = (grid_centered[j] - rho * grid_centered[i] - step/2) / sigma
                 Pi[i, j] = cdf(d, threshold_upper) - cdf(d, threshold_lower)
             end
         end
@@ -158,9 +158,9 @@ struct SVDiscretization
     sigma_grid::Vector{Float64}      # Log volatility grid
     n_D::Int
     n_sigma::Int
-    Pi_sigma::Matrix{Float64}         # Volatility transition P(σ'|σ)
-    Pi_D_given_sigma::Array{Float64,3}  # Demand transition P(D'|D,σ) for each σ
-    Pi_joint::Matrix{Float64}     # Joint transition on (D,σ) pairs
+    Pi_sigma::Matrix{Float64}         # Volatility transition P(sigma'|sigma)
+    Pi_D_given_sigma::Array{Float64,3}  # Demand transition P(D'|D,sigma) for each sigma
+    Pi_joint::Matrix{Float64}     # Joint transition on (D,sigma) pairs
 end
 
 """
@@ -185,9 +185,9 @@ function discretize_sv_process(demand::DemandProcess, vol::VolatilityProcess,
 
     # 1. Discretize volatility process (independent)
     if method == :rouwenhorst
-        sigma_grid, Pi_sigma = rouwenhorst(n_sigma, vol.rho_sigma, vol.sigma_eta; μ=vol.sigma_bar)
+        sigma_grid, Pi_sigma = rouwenhorst(n_sigma, vol.rho_sigma, vol.sigma_eta; mu=vol.sigma_bar)
     else
-        sigma_grid, Pi_sigma = tauchen(n_sigma, vol.rho_sigma, vol.sigma_eta; μ=vol.sigma_bar)
+        sigma_grid, Pi_sigma = tauchen(n_sigma, vol.rho_sigma, vol.sigma_eta; mu=vol.sigma_bar)
     end
 
     # 2. Discretize demand process for each volatility level
@@ -200,9 +200,9 @@ function discretize_sv_process(demand::DemandProcess, vol::VolatilityProcess,
 
         # Discretize demand with this volatility
         if method == :rouwenhorst
-            D_grid_temp, Pi_D_temp = rouwenhorst(n_D, demand.rho_D, sigma_level; μ=demand.mu_D)
+            D_grid_temp, Pi_D_temp = rouwenhorst(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
         else
-            D_grid_temp, Pi_D_temp = tauchen(n_D, demand.rho_D, sigma_level; μ=demand.mu_D)
+            D_grid_temp, Pi_D_temp = tauchen(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
         end
 
         D_grids[i_sigma] = D_grid_temp
@@ -221,7 +221,7 @@ function discretize_sv_process(demand::DemandProcess, vol::VolatilityProcess,
     end
 
     # 5. Construct joint transition matrix
-    # State space is (D, σ) pairs, ordered as [(D₁,σ₁), (D₂,σ₁), ..., (Dₙ,σ₁), (D₁,σ₂), ...]
+    # State space is (D, sigma) pairs, ordered as [(D_1,sigma_1), (D_2,sigma_1), ..., (D_n,sigma_1), (D_1,sigma_2), ...]
     n_states = n_D * n_sigma
     Pi_joint = zeros(n_states, n_states)
 
@@ -233,7 +233,7 @@ function discretize_sv_process(demand::DemandProcess, vol::VolatilityProcess,
                 for i_D_next in 1:n_D
                     i_state_next = (i_sigma_next - 1) * n_D + i_D_next
 
-                    # Joint probability: P(D',σ'|D,σ) = P(D'|D,σ) * P(σ'|σ)
+                    # Joint probability: P(D',sigma'|D,sigma) = P(D'|D,sigma) * P(sigma'|sigma)
                     Pi_joint[i_state, i_state_next] = Pi_D_given_sigma[i_D, i_D_next, i_sigma] * Pi_sigma[i_sigma, i_sigma_next]
                 end
             end
@@ -271,7 +271,7 @@ function stationary_distribution(Pi::Matrix{Float64}; tol::Float64=1e-10, max_it
 end
 
 """
-    verify_discretization(grid::Vector{Float64}, Pi::Matrix{Float64}, ρ::Float64, σ::Float64; μ::Float64=0.0)
+    verify_discretization(grid::Vector{Float64}, Pi::Matrix{Float64}, rho::Float64, sigma::Float64; mu::Float64=0.0)
 
 Verify that discretization matches theoretical moments of AR(1) process.
 
@@ -281,7 +281,7 @@ Returns NamedTuple with:
 - theoretical_autocorr, empirical_autocorr
 """
 function verify_discretization(grid::Vector{Float64}, Pi::Matrix{Float64},
-                               ρ::Float64, σ::Float64; μ::Float64=0.0)
+                               rho::Float64, sigma::Float64; mu::Float64=0.0)
     # Compute stationary distribution
     pi_stat = stationary_distribution(Pi)
 
@@ -295,9 +295,9 @@ function verify_discretization(grid::Vector{Float64}, Pi::Matrix{Float64},
     emp_autocorr = (E_x_next_x - emp_mean^2) / emp_std^2
 
     # Theoretical moments
-    theo_mean = μ
-    theo_std = σ / sqrt(1 - ρ^2)
-    theo_autocorr = ρ
+    theo_mean = mu
+    theo_std = sigma / sqrt(1 - rho^2)
+    theo_autocorr = rho
 
     return (
         theoretical_mean = theo_mean,

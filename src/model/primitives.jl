@@ -2,9 +2,9 @@
 Primitive economic functions: profit, marginal products, etc.
 
 The profit function is derived from iso-elastic demand and Cobb-Douglas production:
-    π(K, D) = (h / (1-γ)) * D^γ * K^(1-γ)
+    pi(K, D) = (h / (1-gamma)) * D^gamma * K^(1-gamma)
 
-where γ and h are derived from structural parameters α and ε.
+where gamma and h are derived from structural parameters alpha and epsilon.
 """
 
 """
@@ -12,12 +12,12 @@ where γ and h are derived from structural parameters α and ε.
 
 Compute per-semester operating profit.
 
-π(K, D) = (h / (1-γ)) * D^γ * K^(1-γ)
+pi(K, D) = (h / (1-gamma)) * D^gamma * K^(1-gamma)
 
 # Arguments
 - `K`: Capital stock
 - `D`: Demand level (not log demand)
-- `derived`: DerivedParameters containing γ and h
+- `derived`: DerivedParameters containing gamma and h
 
 # Returns
 - Operating profit (> 0 for K, D > 0)
@@ -26,18 +26,18 @@ function profit(K::Float64, D::Float64, derived::DerivedParameters)
     @assert K > 0.0 "Capital must be positive"
     @assert D > 0.0 "Demand must be positive"
 
-    γ = derived.gamma
+    gamma = derived.gamma
     h = derived.h
 
-    return (h / (1 - γ)) * D^γ * K^(1 - γ)
+    return (h / (1 - gamma)) * D^gamma * K^(1 - gamma)
 end
 
 """
     marginal_product_capital(K::Float64, D::Float64, derived::DerivedParameters) -> Float64
 
-Compute marginal product of capital: ∂π/∂K.
+Compute marginal product of capital: ∂pi/∂K.
 
-MPK = h * D^γ * K^(-γ)
+MPK = h * D^gamma * K^(-gamma)
 
 # Arguments
 - `K`: Capital stock
@@ -51,16 +51,16 @@ function marginal_product_capital(K::Float64, D::Float64, derived::DerivedParame
     @assert K > 0.0 "Capital must be positive"
     @assert D > 0.0 "Demand must be positive"
 
-    γ = derived.gamma
+    gamma = derived.gamma
     h = derived.h
 
-    return h * D^γ * K^(-γ)
+    return h * D^gamma * K^(-gamma)
 end
 
 """
     profit_derivative_K(K::Float64, D::Float64, derived::DerivedParameters) -> Float64
 
-Alias for marginal_product_capital. Returns ∂π/∂K.
+Alias for marginal_product_capital. Returns ∂pi/∂K.
 """
 profit_derivative_K(K::Float64, D::Float64, derived::DerivedParameters) =
     marginal_product_capital(K, D, derived)
@@ -68,9 +68,9 @@ profit_derivative_K(K::Float64, D::Float64, derived::DerivedParameters) =
 """
     profit_derivative_D(K::Float64, D::Float64, derived::DerivedParameters) -> Float64
 
-Compute marginal product of demand: ∂π/∂D.
+Compute marginal product of demand: ∂pi/∂D.
 
-∂π/∂D = (h * γ / (1-γ)) * D^(γ-1) * K^(1-γ)
+∂pi/∂D = (h * gamma / (1-gamma)) * D^(gamma-1) * K^(1-gamma)
 
 # Arguments
 - `K`: Capital stock
@@ -84,18 +84,18 @@ function profit_derivative_D(K::Float64, D::Float64, derived::DerivedParameters)
     @assert K > 0.0 "Capital must be positive"
     @assert D > 0.0 "Demand must be positive"
 
-    γ = derived.gamma
+    gamma = derived.gamma
     h = derived.h
 
-    return (h * γ / (1 - γ)) * D^(γ - 1) * K^(1 - γ)
+    return (h * gamma / (1 - gamma)) * D^(gamma - 1) * K^(1 - gamma)
 end
 
 """
     profit_second_derivative_K(K::Float64, D::Float64, derived::DerivedParameters) -> Float64
 
-Compute second derivative of profit w.r.t. capital: ∂²π/∂K².
+Compute second derivative of profit w.r.t. capital: ∂²pi/∂K².
 
-∂²π/∂K² = -γ * h * D^γ * K^(-γ-1) < 0
+∂²pi/∂K² = -gamma * h * D^gamma * K^(-gamma-1) < 0
 
 This is negative, confirming concavity in K.
 
@@ -111,10 +111,10 @@ function profit_second_derivative_K(K::Float64, D::Float64, derived::DerivedPara
     @assert K > 0.0 "Capital must be positive"
     @assert D > 0.0 "Demand must be positive"
 
-    γ = derived.gamma
+    gamma = derived.gamma
     h = derived.h
 
-    return -γ * h * D^γ * K^(-γ - 1)
+    return -gamma * h * D^gamma * K^(-gamma - 1)
 end
 
 """
@@ -154,15 +154,15 @@ end
 """
     optimal_capital_static(D::Float64, user_cost::Float64, derived::DerivedParameters) -> Float64
 
-Compute optimal capital in static problem: max_K π(K,D) - user_cost * K.
+Compute optimal capital in static problem: max_K pi(K,D) - user_cost * K.
 
 From FOC: MPK = user_cost
-=> h * D^γ * K^(-γ) = user_cost
-=> K* = (h * D^γ / user_cost)^(1/γ)
+=> h * D^gamma * K^(-gamma) = user_cost
+=> K* = (h * D^gamma / user_cost)^(1/gamma)
 
 # Arguments
 - `D`: Demand level
-- `user_cost`: User cost of capital (typically δ/β in steady state)
+- `user_cost`: User cost of capital (typically delta/beta in steady state)
 - `derived`: DerivedParameters
 
 # Returns
@@ -172,38 +172,38 @@ function optimal_capital_static(D::Float64, user_cost::Float64, derived::Derived
     @assert D > 0.0 "Demand must be positive"
     @assert user_cost > 0.0 "User cost must be positive"
 
-    γ = derived.gamma
+    gamma = derived.gamma
     h = derived.h
 
-    return (h * D^γ / user_cost)^(1 / γ)
+    return (h * D^gamma / user_cost)^(1 / gamma)
 end
 
 """
     profit_elasticity_K(K::Float64, D::Float64, derived::DerivedParameters) -> Float64
 
-Compute elasticity of profit w.r.t. capital: (K/π) * (∂π/∂K).
+Compute elasticity of profit w.r.t. capital: (K/pi) * (∂pi/∂K).
 
 # Returns
-- Elasticity (should equal 1 - γ)
+- Elasticity (should equal 1 - gamma)
 """
 function profit_elasticity_K(K::Float64, D::Float64, derived::DerivedParameters)
-    π = profit(K, D, derived)
+    pi = profit(K, D, derived)
     mpk = marginal_product_capital(K, D, derived)
-    return (K / π) * mpk
+    return (K / pi) * mpk
 end
 
 """
     profit_elasticity_D(K::Float64, D::Float64, derived::DerivedParameters) -> Float64
 
-Compute elasticity of profit w.r.t. demand: (D/π) * (∂π/∂D).
+Compute elasticity of profit w.r.t. demand: (D/pi) * (∂pi/∂D).
 
 # Returns
-- Elasticity (should equal γ)
+- Elasticity (should equal gamma)
 """
 function profit_elasticity_D(K::Float64, D::Float64, derived::DerivedParameters)
-    π = profit(K, D, derived)
+    pi = profit(K, D, derived)
     mpd = profit_derivative_D(K, D, derived)
-    return (D / π) * mpd
+    return (D / pi) * mpd
 end
 
 """
@@ -222,9 +222,9 @@ function check_profit_properties(derived::DerivedParameters; K_test=1.0, D_test=
     all_pass = true
 
     # 1. Positivity
-    π = profit(K_test, D_test, derived)
-    if π <= 0
-        @warn "Profit is not positive: π = $π"
+    pi = profit(K_test, D_test, derived)
+    if pi <= 0
+        @warn "Profit is not positive: pi = $pi"
         all_pass = false
     end
 
@@ -238,23 +238,23 @@ function check_profit_properties(derived::DerivedParameters; K_test=1.0, D_test=
     # 3. Concave in K
     d2pi_dK2 = profit_second_derivative_K(K_test, D_test, derived)
     if d2pi_dK2 >= 0
-        @warn "Profit is not concave in K: ∂²π/∂K² = $d2pi_dK2"
+        @warn "Profit is not concave in K: ∂²pi/∂K² = $d2pi_dK2"
         all_pass = false
     end
 
-    # 4. Elasticity w.r.t. K should equal 1 - γ
-    ε_K = profit_elasticity_K(K_test, D_test, derived)
-    expected_ε_K = 1 - derived.gamma
-    if !isapprox(ε_K, expected_ε_K, rtol=1e-6)
-        @warn "Capital elasticity incorrect: got $ε_K, expected $expected_ε_K"
+    # 4. Elasticity w.r.t. K should equal 1 - gamma
+    epsilon_K = profit_elasticity_K(K_test, D_test, derived)
+    expected_epsilon_K = 1 - derived.gamma
+    if !isapprox(epsilon_K, expected_epsilon_K, rtol=1e-6)
+        @warn "Capital elasticity incorrect: got $epsilon_K, expected $expected_epsilon_K"
         all_pass = false
     end
 
-    # 5. Elasticity w.r.t. D should equal γ
-    ε_D = profit_elasticity_D(K_test, D_test, derived)
-    expected_ε_D = derived.gamma
-    if !isapprox(ε_D, expected_ε_D, rtol=1e-6)
-        @warn "Demand elasticity incorrect: got $ε_D, expected $expected_ε_D"
+    # 5. Elasticity w.r.t. D should equal gamma
+    epsilon_D = profit_elasticity_D(K_test, D_test, derived)
+    expected_epsilon_D = derived.gamma
+    if !isapprox(epsilon_D, expected_epsilon_D, rtol=1e-6)
+        @warn "Demand elasticity incorrect: got $epsilon_D, expected $expected_epsilon_D"
         all_pass = false
     end
 

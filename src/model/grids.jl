@@ -15,7 +15,7 @@ Complete state space for the dynamic programming problem.
 State variables:
 - K: Capital (continuous, discretized)
 - D: Demand (stochastic, discrete)
-- σ: Volatility (stochastic, discrete)
+- sigma: Volatility (stochastic, discrete)
 """
 struct StateGrids
     # Capital grid
@@ -123,8 +123,8 @@ get_sigma(grids::StateGrids, i_sigma::Int) = exp(grids.sv.sigma_grid[i_sigma])
 """
     get_joint_state_index(grids::StateGrids, i_D::Int, i_sigma::Int) -> Int
 
-Convert (D, σ) indices to joint state index.
-State ordering: [(D₁,σ₁), (D₂,σ₁), ..., (Dₙ_D,σ₁), (D₁,σ₂), ...]
+Convert (D, sigma) indices to joint state index.
+State ordering: [(D_1,sigma_1), (D_2,sigma_1), ..., (D_n_D,sigma_1), (D_1,sigma_2), ...]
 """
 get_joint_state_index(grids::StateGrids, i_D::Int, i_sigma::Int) = (i_sigma - 1) * grids.n_D + i_D
 
@@ -177,7 +177,7 @@ end
     interpolate_value(grids::StateGrids, V::Array{Float64,3},
                       K::Float64, i_D::Int, i_sigma::Int) -> Float64
 
-Interpolate value function at (K, D, σ) using linear interpolation in K.
+Interpolate value function at (K, D, sigma) using linear interpolation in K.
 
 # Arguments
 - `grids`: StateGrids
@@ -206,7 +206,7 @@ end
     interpolate_policy(grids::StateGrids, I_policy::Array{Float64,3},
                        K::Float64, i_D::Int, i_sigma::Int) -> Float64
 
-Interpolate policy function at (K, D, σ) using linear interpolation in K.
+Interpolate policy function at (K, D, sigma) using linear interpolation in K.
 """
 function interpolate_policy(grids::StateGrids, I_policy::Array{Float64,3},
                            K::Float64, i_D::Int, i_sigma::Int)
@@ -231,7 +231,7 @@ end
 
 Compute expected value over stochastic states for each capital level.
 
-E[V(K', D', σ') | D, σ]
+E[V(K', D', sigma') | D, sigma]
 
 # Arguments
 - `grids`: StateGrids
@@ -241,7 +241,7 @@ E[V(K', D', σ') | D, σ]
 - `horizon`: :semester or :year (uses Pi_semester or Pi_year)
 
 # Returns
-- Vector of length n_K containing E[V(K', D', σ') | D, σ] for each K'
+- Vector of length n_K containing E[V(K', D', sigma') | D, sigma] for each K'
 """
 function compute_expectation(grids::StateGrids, V::Array{Float64,3},
                             i_D::Int, i_sigma::Int; horizon::Symbol=:semester)
@@ -271,7 +271,7 @@ end
 
 Compute expected value for a specific next-period capital level.
 
-E[V(K'[i_K_next], D', σ') | D, σ]
+E[V(K'[i_K_next], D', sigma') | D, sigma]
 """
 function compute_conditional_expectation(grids::StateGrids, V::Array{Float64,3},
                                         i_D::Int, i_sigma::Int, i_K_next::Int;
@@ -327,8 +327,8 @@ function print_grid_info(grids::StateGrids)
     println("  Range: [$(round(sigma_levels[1], digits=4)), $(round(sigma_levels[end], digits=4))]")
 
     println("\nTotal State Space:")
-    println("  K × D × σ = $(grids.n_K) × $(grids.n_D) × $(grids.n_sigma) = $(grids.n_K * grids.n_D * grids.n_sigma)")
-    println("  Joint (D,σ) states: $(grids.n_states)")
+    println("  K × D × sigma = $(grids.n_K) × $(grids.n_D) × $(grids.n_sigma) = $(grids.n_K * grids.n_D * grids.n_sigma)")
+    println("  Joint (D,sigma) states: $(grids.n_states)")
 
     println("=" ^ 60)
 end

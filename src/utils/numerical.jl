@@ -22,8 +22,8 @@ Find minimum of univariate function f on interval [a, b] using golden section se
 - `f_opt`: Function value at optimum
 """
 function golden_section_search(f, a, b; tol=1e-6, max_iter=1000)
-    φ = (1 + sqrt(5)) / 2  # Golden ratio
-    resphi = 2 - φ
+    phi = (1 + sqrt(5)) / 2  # Golden ratio
+    resphi = 2 - phi
 
     # Initial points
     x1 = a + resphi * (b - a)

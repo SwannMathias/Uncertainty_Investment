@@ -12,7 +12,7 @@ struct FirmHistory
     K::Vector{Float64}              # Capital stock
     D::Vector{Float64}              # Demand (first semester)
     D_half::Vector{Float64}         # Demand (second semester)
-    σ::Vector{Float64}              # Volatility (first semester)
+    sigma::Vector{Float64}              # Volatility (first semester)
     sigma_half::Vector{Float64}         # Volatility (second semester)
     I::Vector{Float64}              # Initial investment
     Delta_I::Vector{Float64}             # Investment revision
@@ -75,7 +75,7 @@ function simulate_firm(sol::SolvedModel, D_path::Vector{Float64}, sigma_path::Ve
         D_first[year] = D_level
         sigma_first[year] = sigma_level
 
-        # Find nearest grid points for (D, σ)
+        # Find nearest grid points for (D, sigma)
         i_D = argmin(abs.(grids.sv.D_grid .- log_D))
         i_sigma = argmin(abs.(grids.sv.sigma_grid .- log_sigma))
 
@@ -147,7 +147,7 @@ function simulate_firm_panel(sol::SolvedModel, shocks::ShockPanel;
 
     for i in 1:shocks.n_firms
         D_path = shocks.D[i, :]
-        sigma_path = shocks.σ[i, :]
+        sigma_path = shocks.sigma[i, :]
 
         histories[i] = simulate_firm(sol, D_path, sigma_path, K_init; T_years=T_years)
     end

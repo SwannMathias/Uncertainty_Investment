@@ -10,11 +10,11 @@ This script demonstrates:
 
 using Pkg
 Pkg.activate(".")
-using OptimalInvestment
+using UncertaintyInvestment
 using Random
 
 println("="^70)
-println("Optimal Investment Model - Baseline Solution")
+println("Uncertainty Investment Model - Baseline Solution")
 println("="^70)
 
 # ============================================================================
@@ -25,10 +25,10 @@ println("\n1. Setting up model parameters...")
 
 params = ModelParameters(
     # Technology
-    α = 0.33,        # Capital share
-    ε = 4.0,         # Demand elasticity
-    δ = 0.10,        # Annual depreciation
-    β = 0.96,        # Annual discount factor
+    alpha = 0.33,        # Capital share
+    epsilon = 4.0,         # Demand elasticity
+    delta = 0.10,        # Annual depreciation
+    beta = 0.96,        # Annual discount factor
 
     # Demand process (semester frequency)
     demand = DemandProcess(

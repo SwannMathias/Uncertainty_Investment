@@ -1,4 +1,4 @@
-# OptimalInvestment.jl
+# UncertaintyInvestment.jl
 
 A comprehensive Julia package for solving and estimating dynamic investment models with stochastic volatility and flexible adjustment costs.
 
@@ -16,11 +16,11 @@ A comprehensive Julia package for solving and estimating dynamic investment mode
 ```julia
 # From the repository directory
 using Pkg
-Pkg.activate("OptimalInvestment")
+Pkg.activate("UncertaintyInvestment")
 Pkg.instantiate()
 
 # Load the package
-using OptimalInvestment
+using UncertaintyInvestment
 ```
 
 ## Quick Start
@@ -28,17 +28,17 @@ using OptimalInvestment
 ### 1. Define Parameters
 
 ```julia
-using OptimalInvestment
+using UncertaintyInvestment
 
 # Create model parameters
 params = ModelParameters(
-    α = 0.33,        # Capital share
-    ε = 4.0,         # Demand elasticity
-    δ = 0.10,        # Annual depreciation
-    β = 0.96,        # Annual discount factor
-    demand = DemandProcess(μ_D = 0.0, ρ_D = 0.9),
-    volatility = VolatilityProcess(σ̄ = log(0.1), ρ_σ = 0.95, σ_η = 0.1),
-    numerical = NumericalSettings(n_K = 100, n_D = 15, n_σ = 7)
+    alpha = 0.33,        # Capital share
+    epsilon = 4.0,         # Demand elasticity
+    delta = 0.10,        # Annual depreciation
+    beta = 0.96,        # Annual discount factor
+    demand = DemandProcess(mu_D = 0.0, rho_D = 0.9),
+    volatility = VolatilityProcess(sigma_bar = log(0.1), rho_sigma = 0.95, sigma_eta = 0.1),
+    numerical = NumericalSettings(n_K = 100, n_D = 15, n_sigma = 7)
 )
 
 # Print parameter summary
@@ -123,12 +123,12 @@ save_simulation("output/simulations/panel_data.csv", panel)
 # Evaluate value and policy at arbitrary points
 K = 1.0
 D = 1.0
-σ = 0.1
+sigma = 0.1
 
-V_val = evaluate_value(sol_ac, K, D, σ)
-I_opt = evaluate_policy(sol_ac, K, D, σ)
+V_val = evaluate_value(sol_ac, K, D, sigma)
+I_opt = evaluate_policy(sol_ac, K, D, sigma)
 
-println("At (K=$K, D=$D, σ=$σ):")
+println("At (K=$K, D=$D, sigma=$sigma):")
 println("  Value: $V_val")
 println("  Optimal investment: $I_opt")
 ```
@@ -140,49 +140,49 @@ println("  Optimal investment: $I_opt")
 ```
 Year t
 ├── Beginning (t)
-│   ├── Observe: (K_t, D_t, σ_t)
+│   ├── Observe: (K_t, D_t, sigma_t)
 │   └── Choose: Initial investment I_t
 │
 ├── Mid-year (t + 1/2)
-│   ├── Observe: (D_{t+1/2}, σ_{t+1/2})
-│   └── Choose: Investment revision ΔI_t
+│   ├── Observe: (D_{t+1/2}, sigma_{t+1/2})
+│   └── Choose: Investment revision Delta_I_t
 │
 └── End of year
-    └── Capital: K_{t+1} = (1-δ)K_t + I_t + ΔI_t
+    └── Capital: K_{t+1} = (1-delta)K_t + I_t + Delta_I_t
 ```
 
 ### Stochastic Processes (Semester Frequency)
 
 **Demand:**
 ```
-log D_{s+1/2} = μ_D(1-ρ_D) + ρ_D log D_s + σ_s ε_{s+1/2}
+log D_{s+1/2} = mu_D(1-rho_D) + rho_D log D_s + sigma_s epsilon_{s+1/2}
 ```
 
 **Volatility:**
 ```
-log σ_{s+1/2} = σ̄(1-ρ_σ) + ρ_σ log σ_s + σ_η η_{s+1/2}
+log sigma_{s+1/2} = sigma_bar(1-rho_sigma) + rho_sigma log sigma_s + sigma_eta eta_{s+1/2}
 ```
 
 ### Profit Function
 
 ```
-π(K, D) = (h/(1-γ)) D^γ K^(1-γ)
+pi(K, D) = (h/(1-gamma)) D^gamma K^(1-gamma)
 ```
 
 where:
-- γ = (ε-1)/(ε-(1-α))
-- h = α(1-1/ε)^(ε/α) (1-α)^(ε/α-1)
+- gamma = (epsilon-1)/(epsilon-(1-alpha))
+- h = alpha(1-1/epsilon)^(epsilon/alpha) (1-alpha)^(epsilon/alpha-1)
 
 ### Bellman Equations
 
 **Beginning of year:**
 ```
-V(K, D, σ) = max_I { π(K,D) - C_1(I,K) + E[W(K', D, σ) | D, σ] }
+V(K, D, sigma) = max_I { pi(K,D) - C_1(I,K) + E[W(K', D, sigma) | D, sigma] }
 ```
 
 **Mid-year:**
 ```
-W(K', D, σ) = E{ max_ΔI { π(K,D_1/2) - C_2(ΔI,K) + β E[V(K'', D', σ') | D_1/2, σ_1/2] }}
+W(K', D, sigma) = E{ max_Delta_I { pi(K,D_1/2) - C_2(Delta_I,K) + beta E[V(K'', D', sigma') | D_1/2, sigma_1/2] }}
 ```
 
 ## Adjustment Cost Specifications
@@ -190,11 +190,11 @@ W(K', D, σ) = E{ max_ΔI { π(K,D_1/2) - C_2(ΔI,K) + β E[V(K'', D', σ') | D_
 | Type | Formula | Parameters |
 |------|---------|------------|
 | **None** | 0 | — |
-| **Convex** | (ϕ/2)(I_total/K)² K | ϕ |
-| **Separate** | (ϕ₁/2)(I/K)² K + (ϕ₂/2)(ΔI/K)² K | ϕ₁, ϕ₂ |
-| **Fixed** | F · 𝟙{I_total ≠ 0} | F |
-| **Asymmetric** | ϕ⁺(I⁺)²/K + ϕ⁻(I⁻)²/K | ϕ⁺, ϕ⁻ |
-| **Partial Irreversibility** | -(1-p_S) max(-I_total, 0) | p_S ∈ [0,1] |
+| **Convex** | (phi/2)(I_total/K)² K | phi |
+| **Separate** | (phi_1/2)(I/K)² K + (phi_2/2)(Delta_I/K)² K | phi_1, phi_2 |
+| **Fixed** | F · 1{I_total ≠ 0} | F |
+| **Asymmetric** | phi_plus(I_plus)²/K + phi_minus(I_minus)²/K | phi_plus, phi_minus |
+| **Partial Irreversibility** | -(1-p_S) max(-I_total, 0) | p_S in [0,1] |
 | **Composite** | Sum of above | varies |
 
 ## Examples
@@ -208,9 +208,9 @@ See the `scripts/` directory for complete examples:
 ## Project Structure
 
 ```
-OptimalInvestment/
+Uncertainty_Investment/
 ├── src/
-│   ├── OptimalInvestment.jl    # Main module
+│   ├── UncertaintyInvestment.jl    # Main module
 │   ├── model/                   # Economic primitives
 │   │   ├── parameters.jl
 │   │   ├── primitives.jl
@@ -236,7 +236,7 @@ OptimalInvestment/
 
 ## Performance Tips
 
-1. **Grid Size**: Start with smaller grids (n_K=50, n_D=10, n_σ=5) for testing
+1. **Grid Size**: Start with smaller grids (n_K=50, n_D=10, n_sigma=5) for testing
 2. **Howard Acceleration**: Use `howard_steps=10` for faster convergence
 3. **Parallel Simulation**: Firms are independent—use `@threads` for large panels
 4. **Initial Guess**: Provide `V_init` when solving similar models
@@ -247,10 +247,10 @@ If you use this package in your research, please cite:
 
 ```bibtex
 @software{optimalinvestment2024,
-  title = {OptimalInvestment.jl: Dynamic Investment Models with Stochastic Volatility},
+  title = {UncertaintyInvestment.jl: Dynamic Investment Models with Stochastic Volatility},
   author = {Your Name},
   year = {2024},
-  url = {https://github.com/yourusername/OptimalInvestment.jl}
+  url = {https://github.com/yourusername/UncertaintyInvestment.jl}
 }
 ```
 

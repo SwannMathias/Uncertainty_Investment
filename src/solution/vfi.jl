@@ -54,8 +54,8 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
                 for i_K in 1:grids.n_K
                     K = get_K(grids, i_K)
                     # Approximate value as discounted stream of current profit
-                    π = profit(K, D, derived)
-                    V[i_K, i_D, i_sigma] = π / (1 - params.beta)
+                    pi = profit(K, D, derived)
+                    V[i_K, i_D, i_sigma] = pi / (1 - params.beta)
                 end
             end
         end
@@ -163,8 +163,8 @@ High-level interface to solve the model.
 
 # Example
 ```julia
-params = ModelParameters(α=0.33, ε=4.0)
-sol = solve_model(params; ac=ConvexAdjustmentCost(ϕ=2.0))
+params = ModelParameters(alpha=0.33, epsilon=4.0)
+sol = solve_model(params; ac=ConvexAdjustmentCost(phi=2.0))
 ```
 """
 function solve_model(params::ModelParameters; ac=NoAdjustmentCost(), verbose=true)
@@ -288,23 +288,23 @@ function print_solution_diagnostics(diag::NamedTuple)
 end
 
 """
-    evaluate_value(sol::SolvedModel, K::Float64, D::Float64, σ::Float64) -> Float64
+    evaluate_value(sol::SolvedModel, K::Float64, D::Float64, sigma::Float64) -> Float64
 
-Evaluate value function at arbitrary (K, D, σ) using interpolation.
+Evaluate value function at arbitrary (K, D, sigma) using interpolation.
 
 # Arguments
 - `sol`: SolvedModel
 - `K`: Capital level
 - `D`: Demand level (not log)
-- `σ`: Volatility level (not log)
+- `sigma`: Volatility level (not log)
 
 # Returns
 - Interpolated value
 """
-function evaluate_value(sol::SolvedModel, K::Float64, D::Float64, σ::Float64)
-    # Find D and σ indices (nearest neighbor for discrete states)
+function evaluate_value(sol::SolvedModel, K::Float64, D::Float64, sigma::Float64)
+    # Find D and sigma indices (nearest neighbor for discrete states)
     log_D = log(D)
-    log_sigma = log(σ)
+    log_sigma = log(sigma)
 
     i_D = argmin(abs.(sol.grids.sv.D_grid .- log_D))
     i_sigma = argmin(abs.(sol.grids.sv.sigma_grid .- log_sigma))
@@ -314,13 +314,13 @@ function evaluate_value(sol::SolvedModel, K::Float64, D::Float64, σ::Float64)
 end
 
 """
-    evaluate_policy(sol::SolvedModel, K::Float64, D::Float64, σ::Float64) -> Float64
+    evaluate_policy(sol::SolvedModel, K::Float64, D::Float64, sigma::Float64) -> Float64
 
-Evaluate policy function at arbitrary (K, D, σ) using interpolation.
+Evaluate policy function at arbitrary (K, D, sigma) using interpolation.
 """
-function evaluate_policy(sol::SolvedModel, K::Float64, D::Float64, σ::Float64)
+function evaluate_policy(sol::SolvedModel, K::Float64, D::Float64, sigma::Float64)
     log_D = log(D)
-    log_sigma = log(σ)
+    log_sigma = log(sigma)
 
     i_D = argmin(abs.(sol.grids.sv.D_grid .- log_D))
     i_sigma = argmin(abs.(sol.grids.sv.sigma_grid .- log_sigma))
@@ -331,7 +331,7 @@ end
 """
     compute_stationary_distribution(sol::SolvedModel; tol=1e-6, max_iter=10000) -> Array{Float64,3}
 
-Compute stationary distribution of (K, D, σ) under optimal policy.
+Compute stationary distribution of (K, D, sigma) under optimal policy.
 
 This is computationally intensive and not typically needed for estimation.
 """

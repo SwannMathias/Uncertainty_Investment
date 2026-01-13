@@ -73,7 +73,7 @@ end
 """
     create_interpolant_3d(x_grid, y_grid, z_grid, vals; method=:linear)
 
-Create 3D interpolation object for V(K, D, σ).
+Create 3D interpolation object for V(K, D, sigma).
 
 # Arguments
 - `x_grid`: Capital grid
@@ -176,7 +176,7 @@ end
     interpolate_on_K(grids::StateGrids, vals::Array{Float64,3},
                      K::Float64, i_D::Int, i_sigma::Int) -> Float64
 
-Interpolate 3D array (e.g., value function) at continuous K, discrete (D, σ).
+Interpolate 3D array (e.g., value function) at continuous K, discrete (D, sigma).
 
 This is a convenience wrapper around the StateGrids interpolation functions.
 """
