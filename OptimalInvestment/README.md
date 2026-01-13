@@ -52,7 +52,7 @@ print_parameters(params)
 sol_baseline = solve_model(params; ac = NoAdjustmentCost(), verbose = true)
 
 # With convex adjustment costs
-ac = ConvexAdjustmentCost(ϕ = 2.0)
+ac = ConvexAdjustmentCost(phi = 2.0)
 sol_ac = solve_model(params; ac = ac, verbose = true)
 
 # With fixed costs
@@ -62,7 +62,7 @@ sol_fixed = solve_model(params; ac = ac_fixed)
 # Composite costs
 ac_composite = CompositeAdjustmentCost(
     FixedAdjustmentCost(F = 0.05),
-    ConvexAdjustmentCost(ϕ = 1.0)
+    ConvexAdjustmentCost(phi = 1.0)
 )
 sol_comp = solve_model(params; ac = ac_composite)
 ```

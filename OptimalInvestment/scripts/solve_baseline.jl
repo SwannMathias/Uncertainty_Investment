@@ -32,23 +32,23 @@ params = ModelParameters(
 
     # Demand process (semester frequency)
     demand = DemandProcess(
-        μ_D = 0.0,   # Long-run mean of log demand
-        ρ_D = 0.9    # Persistence
+        mu_D = 0.0,   # Long-run mean of log demand
+        rho_D = 0.9    # Persistence
     ),
 
     # Volatility process (semester frequency)
     volatility = VolatilityProcess(
-        σ̄ = log(0.1),   # Long-run mean of log volatility
-        ρ_σ = 0.95,     # Persistence
-        σ_η = 0.15,     # Volatility of volatility
-        ρ_εη = 0.0      # Correlation with demand shocks
+        sigma_bar = log(0.1),   # Long-run mean of log volatility
+        rho_sigma = 0.95,     # Persistence
+        sigma_eta = 0.15,     # Volatility of volatility
+        rho_epsilon_eta = 0.0      # Correlation with demand shocks
     ),
 
     # Numerical settings
     numerical = NumericalSettings(
         n_K = 100,           # Capital grid points
         n_D = 15,            # Demand states
-        n_σ = 7,             # Volatility states
+        n_sigma = 7,             # Volatility states
         K_min_factor = 0.1,
         K_max_factor = 3.0,
         tol_vfi = 1e-6,
@@ -79,7 +79,7 @@ save_solution("output/solutions/baseline.jld2", sol_baseline)
 
 println("\n3. Solving model with convex adjustment costs...")
 
-ac_convex = ConvexAdjustmentCost(ϕ = 2.0)
+ac_convex = ConvexAdjustmentCost(phi = 2.0)
 sol_convex = solve_model(params; ac=ac_convex, verbose=true)
 
 save_solution("output/solutions/convex_ac.jld2", sol_convex)
@@ -103,7 +103,7 @@ println("\n5. Solving model with composite adjustment costs...")
 
 ac_composite = CompositeAdjustmentCost(
     FixedAdjustmentCost(F = 0.05),
-    ConvexAdjustmentCost(ϕ = 1.0)
+    ConvexAdjustmentCost(phi = 1.0)
 )
 sol_composite = solve_model(params; ac=ac_composite, verbose=true)
 

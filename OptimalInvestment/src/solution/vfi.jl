@@ -16,9 +16,9 @@ struct SolvedModel
     params::ModelParameters
     grids::StateGrids
     ac::AbstractAdjustmentCost
-    V::Array{Float64,3}           # V[i_K, i_D, i_σ]
-    I_policy::Array{Float64,3}    # I[i_K, i_D, i_σ]
-    ΔI_policy::Union{Nothing,Array{Float64,5}}  # ΔI[i_K, i_D, i_σ, i_D_half, i_σ_half] (optional)
+    V::Array{Float64,3}           # V[i_K, i_D, i_sigma]
+    I_policy::Array{Float64,3}    # I[i_K, i_D, i_sigma]
+    Delta_I_policy::Union{Nothing,Array{Float64,5}}  # Delta_I[i_K, i_D, i_sigma, i_D_half, i_sigma_half] (optional)
     convergence::NamedTuple
 end
 
@@ -46,16 +46,16 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
 
     # Initialize value and policy functions
     if isnothing(V_init)
-        V = zeros(grids.n_K, grids.n_D, grids.n_σ)
+        V = zeros(grids.n_K, grids.n_D, grids.n_sigma)
         # Better initial guess: static profit
-        for i_σ in 1:grids.n_σ
+        for i_sigma in 1:grids.n_sigma
             for i_D in 1:grids.n_D
                 D = get_D(grids, i_D)
                 for i_K in 1:grids.n_K
                     K = get_K(grids, i_K)
                     # Approximate value as discounted stream of current profit
                     π = profit(K, D, derived)
-                    V[i_K, i_D, i_σ] = π / (1 - params.β)
+                    V[i_K, i_D, i_sigma] = π / (1 - params.beta)
                 end
             end
         end
@@ -64,7 +64,7 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
     end
 
     V_new = similar(V)
-    I_policy = zeros(grids.n_K, grids.n_D, grids.n_σ)
+    I_policy = zeros(grids.n_K, grids.n_D, grids.n_sigma)
 
     # VFI iteration
     iter = 0
@@ -76,7 +76,7 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
         println("\n" * "="^70)
         println("Value Function Iteration")
         println("="^70)
-        println("Grid size: $(grids.n_K) × $(grids.n_D) × $(grids.n_σ) = $(grids.n_K * grids.n_D * grids.n_σ)")
+        println("Grid size: $(grids.n_K) × $(grids.n_D) × $(grids.n_sigma) = $(grids.n_K * grids.n_D * grids.n_sigma)")
         println("Adjustment cost: $(describe_adjustment_cost(ac))")
         println("="^70)
         println(@sprintf("%-8s %-15s %-15s %-15s", "Iter", "V Distance", "Policy Distance", "Time"))
@@ -217,12 +217,12 @@ function solution_diagnostics(sol::SolvedModel)
     I_max = maximum(sol.I_policy)
 
     # Investment rate (I/K) statistics
-    I_rate = zeros(grids.n_K, grids.n_D, grids.n_σ)
-    for i_σ in 1:grids.n_σ
+    I_rate = zeros(grids.n_K, grids.n_D, grids.n_sigma)
+    for i_sigma in 1:grids.n_sigma
         for i_D in 1:grids.n_D
             for i_K in 1:grids.n_K
                 K = get_K(grids, i_K)
-                I_rate[i_K, i_D, i_σ] = sol.I_policy[i_K, i_D, i_σ] / K
+                I_rate[i_K, i_D, i_sigma] = sol.I_policy[i_K, i_D, i_sigma] / K
             end
         end
     end
@@ -249,7 +249,7 @@ function solution_diagnostics(sol::SolvedModel)
         I_rate_std = I_rate_std,
         I_rate_ss = I_rate_ss,
         inaction_frequency = inaction_freq,
-        depreciation_rate = derived.δ_semester
+        depreciation_rate = derived.delta_semester
     )
 end
 
@@ -304,13 +304,13 @@ Evaluate value function at arbitrary (K, D, σ) using interpolation.
 function evaluate_value(sol::SolvedModel, K::Float64, D::Float64, σ::Float64)
     # Find D and σ indices (nearest neighbor for discrete states)
     log_D = log(D)
-    log_σ = log(σ)
+    log_sigma = log(σ)
 
     i_D = argmin(abs.(sol.grids.sv.D_grid .- log_D))
-    i_σ = argmin(abs.(sol.grids.sv.σ_grid .- log_σ))
+    i_sigma = argmin(abs.(sol.grids.sv.sigma_grid .- log_sigma))
 
     # Interpolate on K
-    return interpolate_value(sol.grids, sol.V, K, i_D, i_σ)
+    return interpolate_value(sol.grids, sol.V, K, i_D, i_sigma)
 end
 
 """
@@ -320,12 +320,12 @@ Evaluate policy function at arbitrary (K, D, σ) using interpolation.
 """
 function evaluate_policy(sol::SolvedModel, K::Float64, D::Float64, σ::Float64)
     log_D = log(D)
-    log_σ = log(σ)
+    log_sigma = log(σ)
 
     i_D = argmin(abs.(sol.grids.sv.D_grid .- log_D))
-    i_σ = argmin(abs.(sol.grids.sv.σ_grid .- log_σ))
+    i_sigma = argmin(abs.(sol.grids.sv.sigma_grid .- log_sigma))
 
-    return interpolate_policy(sol.grids, sol.I_policy, K, i_D, i_σ)
+    return interpolate_policy(sol.grids, sol.I_policy, K, i_D, i_sigma)
 end
 
 """
@@ -339,5 +339,5 @@ function compute_stationary_distribution(sol::SolvedModel; tol=1e-6, max_iter=10
     # This would require simulating the distribution forward
     # For now, return a placeholder
     @warn "Stationary distribution computation not yet implemented"
-    return ones(sol.grids.n_K, sol.grids.n_D, sol.grids.n_σ) ./ (sol.grids.n_K * sol.grids.n_D * sol.grids.n_σ)
+    return ones(sol.grids.n_K, sol.grids.n_D, sol.grids.n_sigma) ./ (sol.grids.n_K * sol.grids.n_D * sol.grids.n_sigma)
 end

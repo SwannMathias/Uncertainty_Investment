@@ -4,14 +4,14 @@ using OptimalInvestment
 @testset "OptimalInvestment.jl" begin
     @testset "Parameters" begin
         # Test parameter construction
-        params = ModelParameters(α=0.33, ε=4.0, δ=0.10, β=0.96)
-        @test params.α == 0.33
-        @test params.ε == 4.0
+        params = ModelParameters(alpha=0.33, epsilon=4.0, delta=0.10, beta=0.96)
+        @test params.alpha == 0.33
+        @test params.epsilon == 4.0
 
         # Test derived parameters
         derived = get_derived_parameters(params)
-        @test derived.γ > 0.0
-        @test derived.γ < 1.0
+        @test derived.gamma > 0.0
+        @test derived.gamma < 1.0
         @test derived.h > 0.0
         @test derived.K_ss > 0.0
 
@@ -27,22 +27,22 @@ using OptimalInvestment
         D = 1.0
 
         # Test profit positivity
-        π = profit(K, D, derived)
-        @test π > 0.0
+        pi = profit(K, D, derived)
+        @test pi > 0.0
 
         # Test MPK positivity
         mpk = marginal_product_capital(K, D, derived)
         @test mpk > 0.0
 
         # Test concavity
-        d2π = profit_second_derivative_K(K, D, derived)
-        @test d2π < 0.0
+        d2pi = profit_second_derivative_K(K, D, derived)
+        @test d2pi < 0.0
 
         # Test elasticities
-        ε_K = profit_elasticity_K(K, D, derived)
-        ε_D = profit_elasticity_D(K, D, derived)
-        @test isapprox(ε_K, 1 - derived.γ, rtol=1e-6)
-        @test isapprox(ε_D, derived.γ, rtol=1e-6)
+        epsilon_K = profit_elasticity_K(K, D, derived)
+        epsilon_D = profit_elasticity_D(K, D, derived)
+        @test isapprox(epsilon_K, 1 - derived.gamma, rtol=1e-6)
+        @test isapprox(epsilon_D, derived.gamma, rtol=1e-6)
 
         # Run full property check
         @test check_profit_properties(derived)
@@ -82,44 +82,44 @@ using OptimalInvestment
         σ = 0.1
         μ = 0.0
 
-        grid, Π = rouwenhorst(n, ρ, σ; μ=μ)
+        grid, Pi = rouwenhorst(n, ρ, σ; μ=μ)
         @test length(grid) == n
-        @test size(Π) == (n, n)
-        @test is_valid_probability_matrix(Π)
+        @test size(Pi) == (n, n)
+        @test is_valid_probability_matrix(Pi)
 
         # Verify moments
-        moments = verify_discretization(grid, Π, ρ, σ; μ=μ)
+        moments = verify_discretization(grid, Pi, ρ, σ; μ=μ)
         @test moments.mean_error < 0.1
         @test moments.std_error < 0.1
         @test moments.autocorr_error < 0.1
 
         # Tauchen
-        grid_t, Π_t = tauchen(n, ρ, σ; μ=μ)
+        grid_t, Pi_t = tauchen(n, ρ, σ; μ=μ)
         @test length(grid_t) == n
-        @test is_valid_probability_matrix(Π_t)
+        @test is_valid_probability_matrix(Pi_t)
     end
 
     @testset "SV Discretization" begin
-        demand = DemandProcess(μ_D=0.0, ρ_D=0.9)
-        vol = VolatilityProcess(σ̄=log(0.1), ρ_σ=0.95, σ_η=0.1)
+        demand = DemandProcess(mu_D=0.0, rho_D=0.9)
+        vol = VolatilityProcess(sigma_bar=log(0.1), rho_sigma=0.95, sigma_eta=0.1)
 
         sv = discretize_sv_process(demand, vol, 10, 5)
         @test sv.n_D == 10
-        @test sv.n_σ == 5
+        @test sv.n_sigma == 5
         @test length(sv.D_grid) == 10
-        @test length(sv.σ_grid) == 5
-        @test is_valid_probability_matrix(sv.Π_joint)
+        @test length(sv.sigma_grid) == 5
+        @test is_valid_probability_matrix(sv.Pi_joint)
     end
 
     @testset "Grid Construction" begin
         params = ModelParameters(
-            numerical = NumericalSettings(n_K=50, n_D=10, n_σ=5)
+            numerical = NumericalSettings(n_K=50, n_D=10, n_sigma=5)
         )
 
         grids = construct_grids(params)
         @test grids.n_K == 50
         @test grids.n_D == 10
-        @test grids.n_σ == 5
+        @test grids.n_sigma == 5
         @test length(grids.K_grid) == 50
         @test grids.K_min < grids.K_max
         @test is_monotonic_increasing(grids.K_grid)
@@ -129,7 +129,7 @@ using OptimalInvestment
         # Small grid for fast testing
         params = ModelParameters(
             numerical = NumericalSettings(
-                n_K=20, n_D=7, n_σ=3,
+                n_K=20, n_D=7, n_sigma=3,
                 max_iter=100, tol_vfi=1e-4
             )
         )
@@ -144,14 +144,14 @@ using OptimalInvestment
         @test minimum(sol.V) < maximum(sol.V)  # Value varies across states
 
         # Solve with convex costs
-        sol_ac = solve_model(params; ac=ConvexAdjustmentCost(ϕ=1.0), verbose=false)
+        sol_ac = solve_model(params; ac=ConvexAdjustmentCost(phi=1.0), verbose=false)
         @test sol_ac.convergence.converged
         @test all(isfinite.(sol_ac.V))
     end
 
     @testset "Shock Simulation" begin
-        demand = DemandProcess(μ_D=0.0, ρ_D=0.9)
-        vol = VolatilityProcess(σ̄=log(0.1), ρ_σ=0.95, σ_η=0.1)
+        demand = DemandProcess(mu_D=0.0, rho_D=0.9)
+        vol = VolatilityProcess(sigma_bar=log(0.1), rho_sigma=0.95, sigma_eta=0.1)
 
         # Generate shock panel
         shocks = generate_shock_panel(demand, vol, 10, 20; burn_in=10)

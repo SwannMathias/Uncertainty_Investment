@@ -78,7 +78,7 @@ Create 3D interpolation object for V(K, D, σ).
 # Arguments
 - `x_grid`: Capital grid
 - `y_grid`: Demand indices (1:n_D)
-- `z_grid`: Volatility indices (1:n_σ)
+- `z_grid`: Volatility indices (1:n_sigma)
 - `vals`: 3D array of values
 - `method`: :linear only (cubic not supported for 3D)
 
@@ -174,21 +174,21 @@ end
 
 """
     interpolate_on_K(grids::StateGrids, vals::Array{Float64,3},
-                     K::Float64, i_D::Int, i_σ::Int) -> Float64
+                     K::Float64, i_D::Int, i_sigma::Int) -> Float64
 
 Interpolate 3D array (e.g., value function) at continuous K, discrete (D, σ).
 
 This is a convenience wrapper around the StateGrids interpolation functions.
 """
 function interpolate_on_K(grids::StateGrids, vals::Array{Float64,3},
-                         K::Float64, i_D::Int, i_σ::Int)
+                         K::Float64, i_D::Int, i_sigma::Int)
     i_low, i_high, weight = find_K_bracket(grids, K)
 
     if i_low == i_high
-        return vals[i_low, i_D, i_σ]
+        return vals[i_low, i_D, i_sigma]
     else
-        v_low = vals[i_low, i_D, i_σ]
-        v_high = vals[i_high, i_D, i_σ]
+        v_low = vals[i_low, i_D, i_sigma]
+        v_high = vals[i_high, i_D, i_sigma]
         return (1 - weight) * v_low + weight * v_high
     end
 end

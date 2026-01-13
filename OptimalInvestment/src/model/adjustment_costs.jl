@@ -2,9 +2,9 @@
 Flexible menu of adjustment cost specifications.
 
 All adjustment cost types implement the AbstractAdjustmentCost interface:
-- compute_cost(ac, I, ΔI, K): Total adjustment cost
-- marginal_cost_I(ac, I, ΔI, K): ∂C/∂I
-- marginal_cost_ΔI(ac, I, ΔI, K): ∂C/∂ΔI
+- compute_cost(ac, I, Delta_I, K): Total adjustment cost
+- marginal_cost_I(ac, I, Delta_I, K): ∂C/∂I
+- marginal_cost_Delta_I(ac, I, Delta_I, K): ∂C/∂Delta_I
 - has_fixed_cost(ac): Whether cost function has discontinuity
 - is_differentiable(ac): Whether cost function is differentiable everywhere
 """
@@ -16,25 +16,25 @@ abstract type AbstractAdjustmentCost end
 # =============================================================================
 
 """
-    compute_cost(ac::AbstractAdjustmentCost, I, ΔI, K) -> Float64
+    compute_cost(ac::AbstractAdjustmentCost, I, Delta_I, K) -> Float64
 
-Compute total adjustment cost for investment I (initial) and ΔI (revision).
+Compute total adjustment cost for investment I (initial) and Delta_I (revision).
 """
 function compute_cost end
 
 """
-    marginal_cost_I(ac::AbstractAdjustmentCost, I, ΔI, K) -> Float64
+    marginal_cost_I(ac::AbstractAdjustmentCost, I, Delta_I, K) -> Float64
 
 Compute marginal adjustment cost w.r.t. initial investment I: ∂C/∂I.
 """
 function marginal_cost_I end
 
 """
-    marginal_cost_ΔI(ac::AbstractAdjustmentCost, I, ΔI, K) -> Float64
+    marginal_cost_Delta_I(ac::AbstractAdjustmentCost, I, Delta_I, K) -> Float64
 
-Compute marginal adjustment cost w.r.t. investment revision ΔI: ∂C/∂ΔI.
+Compute marginal adjustment cost w.r.t. investment revision Delta_I: ∂C/∂Delta_I.
 """
-function marginal_cost_ΔI end
+function marginal_cost_Delta_I end
 
 """
     has_fixed_cost(ac::AbstractAdjustmentCost) -> Bool
@@ -56,9 +56,9 @@ function is_differentiable end
 
 struct NoAdjustmentCost <: AbstractAdjustmentCost end
 
-compute_cost(::NoAdjustmentCost, I, ΔI, K) = 0.0
-marginal_cost_I(::NoAdjustmentCost, I, ΔI, K) = 0.0
-marginal_cost_ΔI(::NoAdjustmentCost, I, ΔI, K) = 0.0
+compute_cost(::NoAdjustmentCost, I, Delta_I, K) = 0.0
+marginal_cost_I(::NoAdjustmentCost, I, Delta_I, K) = 0.0
+marginal_cost_Delta_I(::NoAdjustmentCost, I, Delta_I, K) = 0.0
 has_fixed_cost(::NoAdjustmentCost) = false
 is_differentiable(::NoAdjustmentCost) = true
 
@@ -70,7 +70,7 @@ is_differentiable(::NoAdjustmentCost) = true
     ConvexAdjustmentCost
 
 Standard quadratic adjustment cost on total investment:
-C(I, ΔI, K) = (ϕ/2) * ((I + ΔI) / K)^2 * K
+C(I, Delta_I, K) = (ϕ/2) * ((I + Delta_I) / K)^2 * K
 """
 @with_kw struct ConvexAdjustmentCost <: AbstractAdjustmentCost
     ϕ::Float64 = 1.0
@@ -81,19 +81,19 @@ C(I, ΔI, K) = (ϕ/2) * ((I + ΔI) / K)^2 * K
     end
 end
 
-function compute_cost(ac::ConvexAdjustmentCost, I, ΔI, K)
-    I_total = I + ΔI
-    return 0.5 * ac.ϕ * (I_total / K)^2 * K
+function compute_cost(ac::ConvexAdjustmentCost, I, Delta_I, K)
+    I_total = I + Delta_I
+    return 0.5 * ac.phi * (I_total / K)^2 * K
 end
 
-function marginal_cost_I(ac::ConvexAdjustmentCost, I, ΔI, K)
-    I_total = I + ΔI
-    return ac.ϕ * (I_total / K)
+function marginal_cost_I(ac::ConvexAdjustmentCost, I, Delta_I, K)
+    I_total = I + Delta_I
+    return ac.phi * (I_total / K)
 end
 
-function marginal_cost_ΔI(ac::ConvexAdjustmentCost, I, ΔI, K)
-    I_total = I + ΔI
-    return ac.ϕ * (I_total / K)
+function marginal_cost_Delta_I(ac::ConvexAdjustmentCost, I, Delta_I, K)
+    I_total = I + Delta_I
+    return ac.phi * (I_total / K)
 end
 
 has_fixed_cost(::ConvexAdjustmentCost) = false
@@ -107,31 +107,31 @@ is_differentiable(::ConvexAdjustmentCost) = true
     SeparateConvexCost
 
 Separate quadratic costs for initial investment and revision:
-C(I, ΔI, K) = (ϕ₁/2) * (I/K)^2 * K + (ϕ₂/2) * (ΔI/K)^2 * K
+C(I, Delta_I, K) = (phi_1/2) * (I/K)^2 * K + (phi_2/2) * (Delta_I/K)^2 * K
 """
 @with_kw struct SeparateConvexCost <: AbstractAdjustmentCost
-    ϕ₁::Float64 = 1.0   # Initial investment cost
-    ϕ₂::Float64 = 1.0   # Revision cost
+    phi_1::Float64 = 1.0   # Initial investment cost
+    phi_2::Float64 = 1.0   # Revision cost
 
-    function SeparateConvexCost(ϕ₁, ϕ₂)
-        @assert ϕ₁ >= 0.0 "ϕ₁ must be non-negative"
-        @assert ϕ₂ >= 0.0 "ϕ₂ must be non-negative"
-        new(ϕ₁, ϕ₂)
+    function SeparateConvexCost(phi_1, phi_2)
+        @assert phi_1 >= 0.0 "phi_1 must be non-negative"
+        @assert phi_2 >= 0.0 "phi_2 must be non-negative"
+        new(phi_1, phi_2)
     end
 end
 
-function compute_cost(ac::SeparateConvexCost, I, ΔI, K)
-    cost_I = 0.5 * ac.ϕ₁ * (I / K)^2 * K
-    cost_ΔI = 0.5 * ac.ϕ₂ * (ΔI / K)^2 * K
-    return cost_I + cost_ΔI
+function compute_cost(ac::SeparateConvexCost, I, Delta_I, K)
+    cost_I = 0.5 * ac.phi₁ * (I / K)^2 * K
+    cost_Delta_I = 0.5 * ac.phi₂ * (Delta_I / K)^2 * K
+    return cost_I + cost_Delta_I
 end
 
-function marginal_cost_I(ac::SeparateConvexCost, I, ΔI, K)
-    return ac.ϕ₁ * (I / K)
+function marginal_cost_I(ac::SeparateConvexCost, I, Delta_I, K)
+    return ac.phi₁ * (I / K)
 end
 
-function marginal_cost_ΔI(ac::SeparateConvexCost, I, ΔI, K)
-    return ac.ϕ₂ * (ΔI / K)
+function marginal_cost_Delta_I(ac::SeparateConvexCost, I, Delta_I, K)
+    return ac.phi₂ * (Delta_I / K)
 end
 
 has_fixed_cost(::SeparateConvexCost) = false
@@ -145,7 +145,7 @@ is_differentiable(::SeparateConvexCost) = true
     FixedAdjustmentCost
 
 Fixed cost paid whenever total investment is non-zero:
-C(I, ΔI, K) = F * 𝟙{I + ΔI ≠ 0}
+C(I, Delta_I, K) = F * 𝟙{I + Delta_I ≠ 0}
 """
 @with_kw struct FixedAdjustmentCost <: AbstractAdjustmentCost
     F::Float64 = 0.1
@@ -158,17 +158,17 @@ C(I, ΔI, K) = F * 𝟙{I + ΔI ≠ 0}
     end
 end
 
-function compute_cost(ac::FixedAdjustmentCost, I, ΔI, K)
-    I_total = I + ΔI
+function compute_cost(ac::FixedAdjustmentCost, I, Delta_I, K)
+    I_total = I + Delta_I
     return abs(I_total) > ac.threshold ? ac.F : 0.0
 end
 
-function marginal_cost_I(ac::FixedAdjustmentCost, I, ΔI, K)
+function marginal_cost_I(ac::FixedAdjustmentCost, I, Delta_I, K)
     # Marginal cost is zero except at discontinuity
     return 0.0
 end
 
-function marginal_cost_ΔI(ac::FixedAdjustmentCost, I, ΔI, K)
+function marginal_cost_Delta_I(ac::FixedAdjustmentCost, I, Delta_I, K)
     return 0.0
 end
 
@@ -183,44 +183,44 @@ is_differentiable(::FixedAdjustmentCost) = false
     AsymmetricAdjustmentCost
 
 Different convex costs for positive vs negative net investment:
-C(I, ΔI, K) = ϕ⁺ * (I_total^+)^2 / K + ϕ⁻ * (I_total^-)^2 / K
+C(I, Delta_I, K) = ϕ⁺ * (I_total^+)^2 / K + ϕ⁻ * (I_total^-)^2 / K
 
 where I_total^+ = max(I_total, 0) and I_total^- = max(-I_total, 0).
 """
 @with_kw struct AsymmetricAdjustmentCost <: AbstractAdjustmentCost
-    ϕ_plus::Float64 = 1.0   # Cost for expansion
-    ϕ_minus::Float64 = 2.0  # Cost for contraction (typically higher)
+    phi_plus::Float64 = 1.0   # Cost for expansion
+    phi_minus::Float64 = 2.0  # Cost for contraction (typically higher)
 
-    function AsymmetricAdjustmentCost(ϕ_plus, ϕ_minus)
-        @assert ϕ_plus >= 0.0 "ϕ_plus must be non-negative"
-        @assert ϕ_minus >= 0.0 "ϕ_minus must be non-negative"
-        new(ϕ_plus, ϕ_minus)
+    function AsymmetricAdjustmentCost(phi_plus, phi_minus)
+        @assert phi_plus >= 0.0 "phi_plus must be non-negative"
+        @assert phi_minus >= 0.0 "phi_minus must be non-negative"
+        new(phi_plus, phi_minus)
     end
 end
 
-function compute_cost(ac::AsymmetricAdjustmentCost, I, ΔI, K)
-    I_total = I + ΔI
+function compute_cost(ac::AsymmetricAdjustmentCost, I, Delta_I, K)
+    I_total = I + Delta_I
 
     if I_total > 0
-        return ac.ϕ_plus * I_total^2 / K
+        return ac.phi_plus * I_total^2 / K
     else
-        return ac.ϕ_minus * I_total^2 / K
+        return ac.phi_minus * I_total^2 / K
     end
 end
 
-function marginal_cost_I(ac::AsymmetricAdjustmentCost, I, ΔI, K)
-    I_total = I + ΔI
+function marginal_cost_I(ac::AsymmetricAdjustmentCost, I, Delta_I, K)
+    I_total = I + Delta_I
 
     if I_total > 0
-        return 2 * ac.ϕ_plus * I_total / K
+        return 2 * ac.phi_plus * I_total / K
     else
-        return 2 * ac.ϕ_minus * I_total / K
+        return 2 * ac.phi_minus * I_total / K
     end
 end
 
-function marginal_cost_ΔI(ac::AsymmetricAdjustmentCost, I, ΔI, K)
+function marginal_cost_Delta_I(ac::AsymmetricAdjustmentCost, I, Delta_I, K)
     # Same as marginal_cost_I since both affect I_total
-    return marginal_cost_I(ac, I, ΔI, K)
+    return marginal_cost_I(ac, I, Delta_I, K)
 end
 
 has_fixed_cost(::AsymmetricAdjustmentCost) = false
@@ -234,7 +234,7 @@ is_differentiable(::AsymmetricAdjustmentCost) = false  # Kink at zero
     PartialIrreversibility
 
 Capital can be sold but at fraction p_S < 1 of purchase price:
-C(I, ΔI, K) = -(1 - p_S) * max(-(I + ΔI), 0)
+C(I, Delta_I, K) = -(1 - p_S) * max(-(I + Delta_I), 0)
 
 This creates an asymmetry: selling capital is costly.
 """
@@ -247,8 +247,8 @@ This creates an asymmetry: selling capital is costly.
     end
 end
 
-function compute_cost(ac::PartialIrreversibility, I, ΔI, K)
-    I_total = I + ΔI
+function compute_cost(ac::PartialIrreversibility, I, Delta_I, K)
+    I_total = I + Delta_I
 
     if I_total < 0
         # Selling: lose (1 - p_S) fraction
@@ -258,8 +258,8 @@ function compute_cost(ac::PartialIrreversibility, I, ΔI, K)
     end
 end
 
-function marginal_cost_I(ac::PartialIrreversibility, I, ΔI, K)
-    I_total = I + ΔI
+function marginal_cost_I(ac::PartialIrreversibility, I, Delta_I, K)
+    I_total = I + Delta_I
 
     if I_total < 0
         return -(1 - ac.p_S)
@@ -268,8 +268,8 @@ function marginal_cost_I(ac::PartialIrreversibility, I, ΔI, K)
     end
 end
 
-function marginal_cost_ΔI(ac::PartialIrreversibility, I, ΔI, K)
-    return marginal_cost_I(ac, I, ΔI, K)
+function marginal_cost_Delta_I(ac::PartialIrreversibility, I, Delta_I, K)
+    return marginal_cost_I(ac, I, Delta_I, K)
 end
 
 has_fixed_cost(::PartialIrreversibility) = false
@@ -298,16 +298,16 @@ end
 CompositeAdjustmentCost(components::AbstractAdjustmentCost...) =
     CompositeAdjustmentCost(collect(components))
 
-function compute_cost(ac::CompositeAdjustmentCost, I, ΔI, K)
-    return sum(compute_cost(c, I, ΔI, K) for c in ac.components)
+function compute_cost(ac::CompositeAdjustmentCost, I, Delta_I, K)
+    return sum(compute_cost(c, I, Delta_I, K) for c in ac.components)
 end
 
-function marginal_cost_I(ac::CompositeAdjustmentCost, I, ΔI, K)
-    return sum(marginal_cost_I(c, I, ΔI, K) for c in ac.components)
+function marginal_cost_I(ac::CompositeAdjustmentCost, I, Delta_I, K)
+    return sum(marginal_cost_I(c, I, Delta_I, K) for c in ac.components)
 end
 
-function marginal_cost_ΔI(ac::CompositeAdjustmentCost, I, ΔI, K)
-    return sum(marginal_cost_ΔI(c, I, ΔI, K) for c in ac.components)
+function marginal_cost_Delta_I(ac::CompositeAdjustmentCost, I, Delta_I, K)
+    return sum(marginal_cost_Delta_I(c, I, Delta_I, K) for c in ac.components)
 end
 
 function has_fixed_cost(ac::CompositeAdjustmentCost)
@@ -331,13 +331,13 @@ function describe_adjustment_cost(ac::AbstractAdjustmentCost)
     if ac isa NoAdjustmentCost
         return "No adjustment costs"
     elseif ac isa ConvexAdjustmentCost
-        return "Convex: ($(ac.ϕ)/2) * (I_total/K)²"
+        return "Convex: ($(ac.phi)/2) * (I_total/K)²"
     elseif ac isa SeparateConvexCost
-        return "Separate convex: ϕ₁=$(ac.ϕ₁) (initial), ϕ₂=$(ac.ϕ₂) (revision)"
+        return "Separate convex: phi_1=$(ac.phi₁) (initial), phi_2=$(ac.phi₂) (revision)"
     elseif ac isa FixedAdjustmentCost
         return "Fixed cost: F=$(ac.F)"
     elseif ac isa AsymmetricAdjustmentCost
-        return "Asymmetric: ϕ⁺=$(ac.ϕ_plus), ϕ⁻=$(ac.ϕ_minus)"
+        return "Asymmetric: ϕ⁺=$(ac.phi_plus), ϕ⁻=$(ac.phi_minus)"
     elseif ac isa PartialIrreversibility
         return "Partial irreversibility: resale price=$(ac.p_S)"
     elseif ac isa CompositeAdjustmentCost
@@ -349,8 +349,8 @@ function describe_adjustment_cost(ac::AbstractAdjustmentCost)
 end
 
 """
-    total_adjustment_cost(ac, I, ΔI, K) -> Float64
+    total_adjustment_cost(ac, I, Delta_I, K) -> Float64
 
 Alias for compute_cost for readability.
 """
-total_adjustment_cost(ac, I, ΔI, K) = compute_cost(ac, I, ΔI, K)
+total_adjustment_cost(ac, I, Delta_I, K) = compute_cost(ac, I, Delta_I, K)
