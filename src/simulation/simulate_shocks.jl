@@ -1,9 +1,31 @@
 """
 Simulate stochastic shock paths for demand and volatility processes.
+
+# Parallelization
+
+This module supports multi-threaded parallelization of shock panel generation.
+Each thread generates shocks for a subset of firms using independent RNG streams.
+
+To enable parallel execution:
+1. Start Julia with multiple threads: `julia -t 8`
+2. Use `generate_shock_panel_parallel()` or pass `use_parallel=true`
+
+# Reproducibility
+
+When using parallel shock generation with a seed:
+- The master RNG is used to generate per-firm seeds
+- Each firm gets a deterministic, unique seed based on the master seed
+- Results are reproducible regardless of thread count
+- Seeds are computed as: seed_base + firm_index
+
+This ensures that firm i always gets the same shock sequence,
+regardless of which thread simulates it.
 """
 
 using Random
+using Random: MersenneTwister
 using Distributions
+using Base.Threads: @threads, nthreads, threadid
 
 """
     ShockPanel
@@ -137,7 +159,8 @@ end
 """
     generate_shock_panel(demand::DemandProcess, vol::VolatilityProcess,
                         n_firms::Int, T::Int;
-                        burn_in::Int=100, rng=Random.GLOBAL_RNG) -> ShockPanel
+                        burn_in::Int=100, rng=Random.GLOBAL_RNG,
+                        use_parallel::Bool=false, seed::Union{Int,Nothing}=nothing) -> ShockPanel
 
 Generate panel of shock paths for multiple firms.
 
@@ -147,14 +170,30 @@ Generate panel of shock paths for multiple firms.
 - `n_firms`: Number of firms
 - `T`: Length of each path (in semesters)
 - `burn_in`: Number of initial periods to discard
-- `rng`: Random number generator
+- `rng`: Random number generator (used in serial mode)
+- `use_parallel`: Enable parallel generation (default: false for backward compatibility)
+- `seed`: Master seed for parallel generation (only used if use_parallel=true)
+
+# Parallelization
+When `use_parallel=true` and multiple threads are available:
+- Each firm gets a unique RNG seeded as: seed_base + firm_index
+- This ensures reproducibility regardless of thread count
+- The `rng` argument is ignored in parallel mode
 
 # Returns
 - ShockPanel object
 """
 function generate_shock_panel(demand::DemandProcess, vol::VolatilityProcess,
                              n_firms::Int, T::Int;
-                             burn_in::Int=100, rng=Random.GLOBAL_RNG)
+                             burn_in::Int=100, rng=Random.GLOBAL_RNG,
+                             use_parallel::Bool=false, seed::Union{Int,Nothing}=nothing)
+    # Use parallel version if requested and threads available
+    if use_parallel && nthreads() > 1
+        return generate_shock_panel_parallel(demand, vol, n_firms, T;
+                                             burn_in=burn_in, seed=seed)
+    end
+
+    # Serial implementation
     @assert n_firms > 0 "n_firms must be positive"
     @assert T > 0 "T must be positive"
     @assert burn_in >= 0 "burn_in must be non-negative"
@@ -265,3 +304,91 @@ function print_shock_statistics(panel::ShockPanel)
 
     println("="^70)
 end
+
+# ============================================================================
+# Parallel Shock Generation
+# ============================================================================
+
+"""
+    generate_shock_panel_parallel(demand::DemandProcess, vol::VolatilityProcess,
+                                  n_firms::Int, T::Int;
+                                  burn_in::Int=100, seed::Union{Int,Nothing}=nothing) -> ShockPanel
+
+Generate panel of shock paths using parallel execution with thread-safe RNGs.
+
+# Parallelization Strategy
+- Each firm gets a unique RNG seeded deterministically from the master seed
+- Firms are distributed across threads using @threads
+- Each thread simulates its assigned firms independently
+- Results are reproducible regardless of thread count
+
+# Reproducibility
+When a seed is provided:
+- Firm i always receives seed = seed_base + i
+- This ensures identical results whether using 1 or N threads
+- Without a seed, behavior is non-deterministic
+
+# Thread Safety
+- Each firm uses its own MersenneTwister RNG instance
+- No shared mutable state between threads
+- Output arrays are written to independent locations
+
+# Arguments
+- `demand`: DemandProcess parameters
+- `vol`: VolatilityProcess parameters
+- `n_firms`: Number of firms
+- `T`: Length of each path (in semesters)
+- `burn_in`: Number of initial periods to discard
+- `seed`: Master random seed (optional, for reproducibility)
+
+# Returns
+- ShockPanel object
+
+# Example
+```julia
+# Reproducible parallel shock generation
+shocks = generate_shock_panel_parallel(
+    params.demand, params.volatility, 1000, 120;
+    seed=12345
+)
+
+# Results are identical regardless of thread count
+```
+"""
+function generate_shock_panel_parallel(demand::DemandProcess, vol::VolatilityProcess,
+                                       n_firms::Int, T::Int;
+                                       burn_in::Int=100, seed::Union{Int,Nothing}=nothing)
+    @assert n_firms > 0 "n_firms must be positive"
+    @assert T > 0 "T must be positive"
+    @assert burn_in >= 0 "burn_in must be non-negative"
+
+    # Determine seed base (use current time if no seed provided)
+    seed_base = isnothing(seed) ? abs(rand(Int)) : seed
+
+    # Allocate storage
+    D_log = zeros(n_firms, T)
+    sigma_log = zeros(n_firms, T)
+
+    n_threads = nthreads()
+
+    # Parallel generation with per-firm RNGs
+    @threads for i in 1:n_firms
+        # Create a unique, deterministic RNG for this firm
+        # This ensures reproducibility regardless of thread assignment
+        firm_rng = MersenneTwister(seed_base + i)
+
+        # Simulate with burn-in using firm-specific RNG
+        D_full, sigma_full = simulate_sv_path(demand, vol, T + burn_in; rng=firm_rng)
+
+        # Keep post-burn-in periods
+        D_log[i, :] = D_full[(burn_in+1):end]
+        sigma_log[i, :] = sigma_full[(burn_in+1):end]
+    end
+
+    # Convert to levels
+    D_level = exp.(D_log)
+    sigma_level = exp.(sigma_log)
+
+    return ShockPanel(n_firms, T, D_log, sigma_log, D_level, sigma_level)
+end
+

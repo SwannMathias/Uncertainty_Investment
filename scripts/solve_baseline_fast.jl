@@ -3,6 +3,13 @@ Fast testing version of baseline model solver.
 
 This script uses reduced grid sizes for quick testing and debugging.
 Typical runtime: < 1 minute instead of several minutes.
+
+# Parallelization
+This script supports multi-threaded execution. To enable:
+    julia -t 8 scripts/solve_baseline_fast.jl
+
+Or set the environment variable before starting Julia:
+    export JULIA_NUM_THREADS=8
 """
 
 using Pkg
@@ -10,12 +17,22 @@ using Pkg
 project_root = dirname(@__DIR__)
 Pkg.activate(project_root)
 
+# Install dependencies if not already installed
+if !isfile(joinpath(project_root, "Manifest.toml"))
+    println("Installing package dependencies...")
+    Pkg.instantiate()
+end
+
 using UncertaintyInvestment
 using Printf
 
 println("="^70)
 println("Uncertainty Investment Model - FAST TESTING MODE")
 println("="^70)
+println("Threads available: $(get_nthreads())")
+if get_nthreads() == 1
+    println("  Tip: Use 'julia -t N' for N threads")
+end
 
 # ============================================================================
 # 1. Define Parameters (FAST VERSION)

@@ -1,11 +1,61 @@
 """
 Value function iteration (VFI) solver for the dynamic investment problem.
 
-Main function: solve_model(params; ac, verbose) -> SolvedModel
+Main function: solve_model(params; ac, verbose, use_parallel) -> SolvedModel
+
+# Parallelization
+
+This module supports multi-threaded parallelization of value function iteration.
+To enable parallel execution:
+
+1. Start Julia with multiple threads:
+   ```bash
+   julia -t 8  # Use 8 threads
+   # Or set environment variable before starting Julia:
+   export JULIA_NUM_THREADS=8
+   ```
+
+2. Pass `use_parallel=true` to `solve_model()` or `value_function_iteration()`
+
+The parallelization is applied to the Bellman operator, which distributes
+the state space optimization across available threads. Each thread independently
+solves the dynamic programming problem for its assigned states.
+
+Thread safety is ensured by:
+- Read-only access to the current value function V
+- Independent write locations for V_new and I_policy per state
+- No shared mutable state between threads
+
+Performance notes:
+- Near-linear speedup for large state spaces (n_states > 1000)
+- Threading overhead may reduce benefit for small problems
+- Recommended: n_threads ≤ number of physical CPU cores
 """
 
 using ProgressMeter
 using Printf
+using Base.Threads: @threads, nthreads, threadid
+
+# Re-export threading utilities for user convenience
+"""
+    get_nthreads() -> Int
+
+Return the number of threads available for parallel execution.
+This wraps `Threads.nthreads()` for convenience.
+
+To increase the number of threads, start Julia with:
+    julia -t N
+or set JULIA_NUM_THREADS=N before starting Julia.
+"""
+get_nthreads() = nthreads()
+
+"""
+    get_threadid() -> Int
+
+Return the ID of the current thread (1 to nthreads()).
+This wraps `Threads.threadid()` for convenience.
+"""
+get_threadid() = threadid()
 
 """
     SolvedModel
@@ -25,7 +75,7 @@ end
 """
     value_function_iteration(grids::StateGrids, params::ModelParameters,
                             ac::AbstractAdjustmentCost;
-                            V_init=nothing, verbose=true) -> SolvedModel
+                            V_init=nothing, verbose=true, use_parallel=true) -> SolvedModel
 
 Solve the model using value function iteration.
 
@@ -35,14 +85,29 @@ Solve the model using value function iteration.
 - `ac`: AbstractAdjustmentCost specification
 - `V_init`: Initial guess for value function (default: zeros)
 - `verbose`: Print iteration progress
+- `use_parallel`: Use multi-threaded parallel execution (default: true)
+
+# Parallelization
+When `use_parallel=true` and Julia is started with multiple threads
+(e.g., `julia -t 8`), the Bellman operator will parallelize over the
+state space. Each thread independently solves the optimization problem
+for its assigned states.
+
+To check/set the number of threads:
+- `get_nthreads()` returns current thread count
+- Start Julia with `julia -t N` or set `JULIA_NUM_THREADS=N`
 
 # Returns
 - SolvedModel object with solution
 """
 function value_function_iteration(grids::StateGrids, params::ModelParameters,
                                  ac::AbstractAdjustmentCost;
-                                 V_init=nothing, verbose=true)
+                                 V_init=nothing, verbose=true, use_parallel=true)
     derived = get_derived_parameters(params)
+
+    # Determine if we should use parallel execution
+    n_threads = nthreads()
+    use_parallel_actual = use_parallel && n_threads > 1
 
     # Initialize value and policy functions
     if isnothing(V_init)
@@ -79,6 +144,16 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
         println("="^70)
         println("Grid size: $(grids.n_K) × $(grids.n_D) × $(grids.n_sigma) = $(grids.n_K * grids.n_D * grids.n_sigma)")
         println("Adjustment cost: $(describe_adjustment_cost(ac))")
+        if use_parallel_actual
+            println("Parallelization: ENABLED ($n_threads threads)")
+        else
+            if use_parallel && n_threads == 1
+                println("Parallelization: DISABLED (only 1 thread available)")
+                println("  Tip: Start Julia with 'julia -t N' for N threads")
+            else
+                println("Parallelization: DISABLED (use_parallel=false)")
+            end
+        end
         println("="^70)
         println(@sprintf("%-8s %-15s %-15s %-15s", "Iter", "V Distance", "Policy Distance", "Time"))
         println("-"^70)
@@ -87,8 +162,12 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
     while iter < params.numerical.max_iter
         iter += 1
 
-        # Apply Bellman operator
-        bellman_operator!(V_new, V, I_policy, grids, params, ac, derived)
+        # Apply Bellman operator (parallel or serial)
+        if use_parallel_actual
+            bellman_operator_parallel!(V_new, V, I_policy, grids, params, ac, derived)
+        else
+            bellman_operator!(V_new, V, I_policy, grids, params, ac, derived)
+        end
 
         # Check convergence
         dist = maximum(abs.(V_new .- V))
@@ -115,6 +194,9 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
                 println("✓ Converged in $iter iterations ($(format_time(elapsed)))")
                 println("  Final distance: $(dist)")
                 println("  Policy distance: $(dist_policy)")
+                if use_parallel_actual
+                    println("  Threads used: $n_threads")
+                end
                 println("="^70)
             end
             break
@@ -123,10 +205,15 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
         # Update value function
         V .= V_new
 
-        # Howard improvement steps
+        # Howard improvement steps (parallel or serial)
         if params.numerical.howard_steps > 0 && iter % 20 == 0
-            howard_improvement_step!(V, I_policy, grids, params, ac, derived,
-                                    params.numerical.howard_steps)
+            if use_parallel_actual
+                howard_improvement_step_parallel!(V, I_policy, grids, params, ac, derived,
+                                                  params.numerical.howard_steps)
+            else
+                howard_improvement_step!(V, I_policy, grids, params, ac, derived,
+                                        params.numerical.howard_steps)
+            end
         end
 
         if iter == params.numerical.max_iter
@@ -140,14 +227,15 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
         iterations = iter,
         final_distance = dist,
         final_policy_distance = dist_policy,
-        elapsed_time = time() - start_time
+        elapsed_time = time() - start_time,
+        threads_used = use_parallel_actual ? n_threads : 1
     )
 
     return SolvedModel(params, grids, ac, V, I_policy, nothing, convergence)
 end
 
 """
-    solve_model(params::ModelParameters; ac=NoAdjustmentCost(), verbose=true) -> SolvedModel
+    solve_model(params::ModelParameters; ac=NoAdjustmentCost(), verbose=true, use_parallel=true) -> SolvedModel
 
 High-level interface to solve the model.
 
@@ -155,6 +243,14 @@ High-level interface to solve the model.
 - `params`: ModelParameters
 - `ac`: AbstractAdjustmentCost (default: no adjustment costs)
 - `verbose`: Print progress
+- `use_parallel`: Use multi-threaded parallel execution (default: true)
+
+# Parallelization
+The solver automatically uses all available threads when `use_parallel=true`.
+To set the number of threads, start Julia with:
+    julia -t N
+or set the environment variable before starting Julia:
+    export JULIA_NUM_THREADS=N
 
 # Returns
 - SolvedModel object
@@ -163,9 +259,12 @@ High-level interface to solve the model.
 ```julia
 params = ModelParameters(alpha=0.33, epsilon=4.0)
 sol = solve_model(params; ac=ConvexAdjustmentCost(phi=2.0))
+
+# Disable parallelization (for debugging or comparison)
+sol_serial = solve_model(params; ac=ConvexAdjustmentCost(phi=2.0), use_parallel=false)
 ```
 """
-function solve_model(params::ModelParameters; ac=NoAdjustmentCost(), verbose=true)
+function solve_model(params::ModelParameters; ac=NoAdjustmentCost(), verbose=true, use_parallel=true)
     # Validate parameters
     if !validate_parameters(params)
         error("Invalid parameter configuration")
@@ -182,7 +281,7 @@ function solve_model(params::ModelParameters; ac=NoAdjustmentCost(), verbose=tru
     end
 
     # Solve using VFI
-    sol = value_function_iteration(grids, params, ac; verbose=verbose)
+    sol = value_function_iteration(grids, params, ac; verbose=verbose, use_parallel=use_parallel)
 
     # Diagnostics
     if verbose

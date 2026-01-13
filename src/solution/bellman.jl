@@ -387,3 +387,134 @@ function howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3
 
     return nothing
 end
+
+# ============================================================================
+# Parallelized Bellman Operators
+# ============================================================================
+
+"""
+    bellman_operator_parallel!(V_new::Array{Float64,3}, V::Array{Float64,3},
+                               I_policy::Array{Float64,3}, grids::StateGrids,
+                               params::ModelParameters, ac::AbstractAdjustmentCost,
+                               derived::DerivedParameters) -> Nothing
+
+Parallel version of the Bellman operator using multi-threading.
+
+Parallelization strategy:
+- Flatten the 3D state space into 1D indices
+- Distribute work across threads using @threads
+- Each thread independently solves optimization problems for its assigned states
+- No race conditions since each (i_K, i_D, i_sigma) writes to a unique location
+
+Thread safety:
+- V (input) is read-only during the operator
+- V_new and I_policy have independent write locations per state
+- All temporary allocations happen on the stack within each thread
+
+Performance notes:
+- Near-linear speedup expected up to number of physical cores
+- Overhead is minimal for large state spaces (>1000 states)
+- For small state spaces, serial may be faster due to threading overhead
+"""
+function bellman_operator_parallel!(V_new::Array{Float64,3}, V::Array{Float64,3},
+                                    I_policy::Array{Float64,3}, grids::StateGrids,
+                                    params::ModelParameters, ac::AbstractAdjustmentCost,
+                                    derived::DerivedParameters)
+    n_K = grids.n_K
+    n_D = grids.n_D
+    n_sigma = grids.n_sigma
+    n_total = n_K * n_D * n_sigma
+
+    # Parallelize over flattened state space
+    # Each thread handles a subset of states independently
+    @threads for idx in 1:n_total
+        # Convert linear index to 3D indices (column-major order)
+        # Julia arrays are column-major: [i_K, i_D, i_sigma]
+        i_K = ((idx - 1) % n_K) + 1
+        temp = (idx - 1) ÷ n_K
+        i_D = (temp % n_D) + 1
+        i_sigma = (temp ÷ n_D) + 1
+
+        # Solve optimization for this state
+        I_opt, V_value = solve_beginning_year_problem(
+            i_K, i_D, i_sigma, V, grids, params, ac, derived
+        )
+
+        # Store results (no race condition - each idx writes to unique location)
+        V_new[i_K, i_D, i_sigma] = V_value
+        I_policy[i_K, i_D, i_sigma] = I_opt
+    end
+
+    return nothing
+end
+
+"""
+    howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{Float64,3},
+                                      grids::StateGrids, params::ModelParameters,
+                                      ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                                      n_steps::Int) -> Nothing
+
+Parallel version of Howard improvement (policy iteration) steps.
+
+Each step updates the value function for all states in parallel,
+given the fixed policy I_policy.
+
+Thread safety:
+- V_temp is read-only during each step
+- V has independent write locations per state
+- Synchronization happens between steps (implicit barrier at end of @threads)
+"""
+function howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{Float64,3},
+                                           grids::StateGrids, params::ModelParameters,
+                                           ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                                           n_steps::Int)
+    n_K = grids.n_K
+    n_D = grids.n_D
+    n_sigma = grids.n_sigma
+    n_total = n_K * n_D * n_sigma
+
+    V_temp = copy(V)
+
+    for step in 1:n_steps
+        # Parallelize over flattened state space
+        @threads for idx in 1:n_total
+            # Convert linear index to 3D indices
+            i_K = ((idx - 1) % n_K) + 1
+            temp = (idx - 1) ÷ n_K
+            i_D = (temp % n_D) + 1
+            i_sigma = (temp ÷ n_D) + 1
+
+            K = get_K(grids, i_K)
+            D = get_D(grids, i_D)
+
+            # Fixed policy
+            I = I_policy[i_K, i_D, i_sigma]
+
+            # First-semester profit
+            pi_first = profit(K, D, derived)
+
+            # Capital after initial investment
+            K_prime = (1 - derived.delta_semester) * K + I
+
+            # Initial cost
+            if ac isa SeparateConvexCost
+                cost_I = 0.5 * ac.phi₁ * (I / K)^2 * K
+            else
+                cost_I = compute_cost(ac, I, 0.0, K)
+            end
+
+            # Mid-year continuation (using V_temp which is read-only this step)
+            W_val = compute_midyear_continuation(
+                K_prime, i_D, i_sigma, K, I, V_temp, grids, params, ac, derived
+            )
+
+            # Update value (no race condition)
+            V[i_K, i_D, i_sigma] = pi_first - cost_I + W_val
+        end
+
+        # Synchronization point: copy updated V to V_temp for next step
+        V_temp .= V
+    end
+
+    return nothing
+end
