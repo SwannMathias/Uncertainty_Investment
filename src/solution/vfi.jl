@@ -65,11 +65,12 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
 
     V_new = similar(V)
     I_policy = zeros(grids.n_K, grids.n_D, grids.n_sigma)
+    I_policy_old = zeros(grids.n_K, grids.n_D, grids.n_sigma)
 
     # VFI iteration
     iter = 0
     dist = Inf
-    dist_policy = Inf
+    dist_policy = 0.0
     start_time = time()
 
     if verbose
@@ -91,17 +92,14 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
 
         # Check convergence
         dist = maximum(abs.(V_new .- V))
-        dist_policy = maximum(abs.(I_policy .- I_policy))  # This line is wrong, should compare with previous
 
-        # Store previous policy for comparison
-        if iter == 1
-            I_policy_old = copy(I_policy)
-        end
-
+        # Compare with previous policy
         if iter > 1
             dist_policy = maximum(abs.(I_policy .- I_policy_old))
-            I_policy_old = copy(I_policy)
         end
+
+        # Store current policy for next iteration
+        I_policy_old .= I_policy
 
         # Print progress
         if verbose && (iter % 10 == 0 || iter == 1)
