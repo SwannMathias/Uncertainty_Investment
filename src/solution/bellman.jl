@@ -4,11 +4,11 @@ Bellman operators for the nested dynamic programming problem.
 Timeline within year t:
 1. Beginning of year: Observe (K_t, D_t, sigma_t), choose I_t
 2. Mid-year: Observe (D_{t+1/2}, sigma_{t+1/2}), choose Delta_I_t
-3. End of year: K_{t+1} = (1-δ)K_t + I_t + Delta_I_t
+3. End of year: K_{t+1} = (1-delta)K_t + I_t + Delta_I_t
 
 Value functions:
-- V(K, D, σ): Beginning-of-year value
-- W(K', D, σ): Mid-year continuation value (after initial investment)
+- V(K, D, sigma): Beginning-of-year value
+- W(K', D, sigma): Mid-year continuation value (after initial investment)
 """
 
 """
@@ -27,7 +27,7 @@ Given:
 - I_initial: Initial investment chosen at beginning of year
 
 Choose Delta_I to maximize:
-    π(K_current, D_half) - C_2(Delta_I, K_current) + beta_semester * E[V(K'', D', σ') | D_half, sigma_half]
+    pi(K_current, D_half) - C_2(Delta_I, K_current) + beta_semester * E[V(K'', D', sigma') | D_half, sigma_half]
 
 where K'' = K_prime + Delta_I.
 
@@ -83,7 +83,7 @@ function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::In
 
     # If no adjustment costs, analytical solution from FOC
     if ac isa NoAdjustmentCost
-        # FOC: β * ∂EV/∂K = 0 => Choose K'' to maximize EV
+        # FOC: beta * ∂EV/∂K = 0 => Choose K'' to maximize EV
         # This is equivalent to choosing Delta_I to maximize EV(K'')
         # Use simple grid search
         EV_on_grid = derived.beta_semester .* EV
@@ -132,9 +132,9 @@ end
                                   params::ModelParameters, ac::AbstractAdjustmentCost,
                                   derived::DerivedParameters) -> Float64
 
-Compute W(K', D, σ): expected value of mid-year problem.
+Compute W(K', D, sigma): expected value of mid-year problem.
 
-W(K', D, σ) = E_{D_half, sigma_half | D, σ}[max_Delta_I {...}]
+W(K', D, sigma) = E_{D_half, sigma_half | D, sigma}[max_Delta_I {...}]
 
 # Returns
 - Expected mid-year continuation value
@@ -144,7 +144,7 @@ function compute_midyear_continuation(K_prime::Float64, i_D::Int, i_sigma::Int,
                                       V::Array{Float64,3}, grids::StateGrids,
                                       params::ModelParameters, ac::AbstractAdjustmentCost,
                                       derived::DerivedParameters)
-    # Get transition probability from (D, σ) to (D_half, sigma_half)
+    # Get transition probability from (D, sigma) to (D_half, sigma_half)
     i_state = get_joint_state_index(grids, i_D, i_sigma)
 
     W_value = 0.0
@@ -175,9 +175,9 @@ end
 
 Solve beginning-of-year problem: choose I to maximize value.
 
-V(K, D, σ) = max_I { π(K, D) - C_1(I, K) + E[W(K', D, σ) | D, σ] }
+V(K, D, sigma) = max_I { pi(K, D) - C_1(I, K) + E[W(K', D, sigma) | D, sigma] }
 
-where K' = (1-δ)K + I.
+where K' = (1-delta)K + I.
 
 # Returns
 - I_opt: Optimal initial investment
@@ -235,7 +235,7 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
     end
 
     # Determine search bounds for I
-    # Constraint: K_min <= (1-δ)K + I <= K_max
+    # Constraint: K_min <= (1-delta)K + I <= K_max
     I_min = grids.K_min - (1 - derived.delta_semester) * K
     I_max = grids.K_max - (1 - derived.delta_semester) * K
 
@@ -284,7 +284,7 @@ Apply Bellman operator: V_new = T(V).
 
 Updates V_new and I_policy in-place.
 
-For each state (K, D, σ):
+For each state (K, D, sigma):
 1. Solve beginning-of-year problem to get I_opt and V_new
 2. Store optimal policy I_policy[i_K, i_D, i_sigma] = I_opt
 3. Store value V_new[i_K, i_D, i_sigma] = V_value
@@ -336,9 +336,9 @@ end
 Perform Howard improvement (policy iteration) steps.
 
 Given fixed policy I_policy, update value function by iterating:
-V^{k+1} = π + Γ(I_policy) V^k
+V^{k+1} = pi + Gamma(I_policy) V^k
 
-where Γ is the transition operator under policy I_policy.
+where Gamma is the transition operator under policy I_policy.
 
 This accelerates VFI convergence.
 """

@@ -14,21 +14,21 @@ struct ShockPanel
     n_firms::Int
     T::Int                        # Length in semesters
     D::Matrix{Float64}            # Log demand [firm, semester]
-    σ::Matrix{Float64}            # Log volatility [firm, semester]
+    sigma::Matrix{Float64}            # Log volatility [firm, semester]
     D_level::Matrix{Float64}      # Demand level [firm, semester]
     sigma_level::Matrix{Float64}      # Volatility level [firm, semester]
 end
 
 """
-    simulate_ar1_path(ρ::Float64, σ::Float64, μ::Float64, T::Int;
+    simulate_ar1_path(rho::Float64, sigma::Float64, mu::Float64, T::Int;
                       x0=nothing, rng=Random.GLOBAL_RNG) -> Vector{Float64}
 
-Simulate AR(1) process: x' = μ(1-ρ) + ρx + σε.
+Simulate AR(1) process: x' = mu(1-rho) + rhox + sigmaepsilon.
 
 # Arguments
-- `ρ`: Persistence
-- `σ`: Standard deviation of innovations
-- `μ`: Long-run mean
+- `rho`: Persistence
+- `sigma`: Standard deviation of innovations
+- `mu`: Long-run mean
 - `T`: Length of path
 - `x0`: Initial value (default: draw from stationary distribution)
 - `rng`: Random number generator
@@ -36,10 +36,10 @@ Simulate AR(1) process: x' = μ(1-ρ) + ρx + σε.
 # Returns
 - Vector of length T with simulated path
 """
-function simulate_ar1_path(ρ::Float64, σ::Float64, μ::Float64, T::Int;
+function simulate_ar1_path(rho::Float64, sigma::Float64, mu::Float64, T::Int;
                           x0=nothing, rng=Random.GLOBAL_RNG)
-    @assert 0.0 <= ρ < 1.0 "ρ must be in [0, 1)"
-    @assert σ > 0.0 "σ must be positive"
+    @assert 0.0 <= rho < 1.0 "rho must be in [0, 1)"
+    @assert sigma > 0.0 "sigma must be positive"
     @assert T > 0 "T must be positive"
 
     # Initialize
@@ -47,16 +47,16 @@ function simulate_ar1_path(ρ::Float64, σ::Float64, μ::Float64, T::Int;
 
     if isnothing(x0)
         # Draw from stationary distribution
-        sigma_x = σ / sqrt(1 - ρ^2)
-        x[1] = μ + sigma_x * randn(rng)
+        sigma_x = sigma / sqrt(1 - rho^2)
+        x[1] = mu + sigma_x * randn(rng)
     else
         x[1] = x0
     end
 
     # Simulate
     for t in 2:T
-        ε = randn(rng)
-        x[t] = μ * (1 - ρ) + ρ * x[t-1] + σ * ε
+        epsilon = randn(rng)
+        x[t] = mu * (1 - rho) + rho * x[t-1] + sigma * epsilon
     end
 
     return x
@@ -102,8 +102,8 @@ function simulate_sv_path(demand::DemandProcess, vol::VolatilityProcess, T::Int;
     # Correlation structure
     if abs(vol.rho_epsilon_eta) > 1e-10
         # Correlated shocks
-        Σ = [1.0 vol.rho_epsilon_eta; vol.rho_epsilon_eta 1.0]
-        mvn = MvNormal(zeros(2), Σ)
+        Sigma = [1.0 vol.rho_epsilon_eta; vol.rho_epsilon_eta 1.0]
+        mvn = MvNormal(zeros(2), Sigma)
     else
         mvn = nothing
     end
@@ -115,20 +115,20 @@ function simulate_sv_path(demand::DemandProcess, vol::VolatilityProcess, T::Int;
 
         if isnothing(mvn)
             # Independent shocks
-            ε_D = randn(rng)
-            ε_sigma = randn(rng)
+            epsilon_D = randn(rng)
+            epsilon_sigma = randn(rng)
         else
             # Correlated shocks
             shocks = rand(rng, mvn)
-            ε_D = shocks[1]
-            ε_sigma = shocks[2]
+            epsilon_D = shocks[1]
+            epsilon_sigma = shocks[2]
         end
 
         # Update demand (volatility affects demand innovation)
-        D_path[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * D_path[t-1] + sigma_current * ε_D
+        D_path[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * D_path[t-1] + sigma_current * epsilon_D
 
         # Update volatility
-        sigma_path[t] = vol.sigma_bar * (1 - vol.rho_sigma) + vol.rho_sigma * sigma_path[t-1] + vol.sigma_eta * ε_sigma
+        sigma_path[t] = vol.sigma_bar * (1 - vol.rho_sigma) + vol.rho_sigma * sigma_path[t-1] + vol.sigma_eta * epsilon_sigma
     end
 
     return D_path, sigma_path
@@ -191,7 +191,7 @@ Extract shock paths for a single firm.
 """
 function get_firm_shocks(panel::ShockPanel, firm_id::Int)
     @assert 1 <= firm_id <= panel.n_firms "firm_id out of range"
-    return panel.D[firm_id, :], panel.σ[firm_id, :]
+    return panel.D[firm_id, :], panel.sigma[firm_id, :]
 end
 
 """
@@ -219,10 +219,10 @@ function shock_statistics(panel::ShockPanel)
         D_log_min = minimum(panel.D),
         D_log_max = maximum(panel.D),
         # Log volatility statistics
-        sigma_log_mean = mean(panel.σ),
-        sigma_log_std = std(panel.σ),
-        sigma_log_min = minimum(panel.σ),
-        sigma_log_max = maximum(panel.σ),
+        sigma_log_mean = mean(panel.sigma),
+        sigma_log_std = std(panel.sigma),
+        sigma_log_min = minimum(panel.sigma),
+        sigma_log_max = maximum(panel.sigma),
         # Level statistics
         D_level_mean = mean(panel.D_level),
         D_level_std = std(panel.D_level),

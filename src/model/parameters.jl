@@ -225,7 +225,7 @@ function print_parameters(p::ModelParameters)
     println("  K_ss (steady state)    = $(round(derived.K_ss, digits=4))")
 
     println("\nNumerical Settings:")
-    println("  n_K × n_D × n_sigma        = $(p.numerical.n_K) × $(p.numerical.n_D) × $(p.numerical.n_sigma)")
+    println("  n_K x n_D x n_sigma        = $(p.numerical.n_K) x $(p.numerical.n_D) x $(p.numerical.n_sigma)")
     println("  K_min factor           = $(p.numerical.K_min_factor)")
     println("  K_max factor           = $(p.numerical.K_max_factor)")
     println("  VFI tolerance          = $(p.numerical.tol_vfi)")

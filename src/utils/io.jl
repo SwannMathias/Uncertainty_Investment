@@ -105,7 +105,7 @@ function export_policy_to_csv(sol::SolvedModel, filename::String; subset_K=nothi
                 push!(rows, (
                     K = K,
                     D = D_level,
-                    σ = sigma_level,
+                    sigma = sigma_level,
                     log_D = log_D,
                     log_sigma = log_sigma,
                     I_initial = I_initial,
@@ -191,23 +191,23 @@ function save_estimation_results(filename::String, result::EstimationResult)
     summary_file = filename * "_summary.csv"
     df_summary = DataFrame(
         parameter = result.param_names,
-        estimate = result.θ_hat,
+        estimate = result.theta_hat,
         std_error = result.se,
-        t_stat = result.θ_hat ./ result.se
+        t_stat = result.theta_hat ./ result.se
     )
     CSV.write(summary_file, df_summary)
 
     # Save full results to JLD2
     full_file = filename * "_full.jld2"
     jldsave(full_file;
-            θ_hat = result.θ_hat,
+            theta_hat = result.theta_hat,
             se = result.se,
             param_names = result.param_names,
             objective_value = result.objective_value,
             convergence = result.convergence,
             iterations = result.iterations,
-            β_sim = result.beta_sim,
-            β_data = result.beta_data,
+            beta_sim = result.beta_sim,
+            beta_data = result.beta_data,
             W = result.W)
 
     println("Estimation results saved to:")
@@ -232,14 +232,14 @@ function load_estimation_results(filename::String)
     data = load(filename)
 
     return EstimationResult(
-        data["θ_hat"],
+        data["theta_hat"],
         data["se"],
         data["param_names"],
         data["objective_value"],
         data["convergence"],
         data["iterations"],
-        data["β_sim"],
-        data["β_data"],
+        data["beta_sim"],
+        data["beta_data"],
         data["W"]
     )
 end
@@ -284,7 +284,7 @@ function export_to_csv(sol::SolvedModel, output_dir::String)
         log_D = repeat(sol.grids.sv.D_grid, outer=sol.grids.n_sigma),
         log_sigma = repeat(sol.grids.sv.sigma_grid, inner=sol.grids.n_D),
         D = exp.(repeat(sol.grids.sv.D_grid, outer=sol.grids.n_sigma)),
-        σ = exp.(repeat(sol.grids.sv.sigma_grid, inner=sol.grids.n_D))
+        sigma = exp.(repeat(sol.grids.sv.sigma_grid, inner=sol.grids.n_D))
     )
     CSV.write(dv_file, df_dv)
 

@@ -30,7 +30,7 @@ Convert simulated firm histories into panel DataFrame.
   - K: Capital stock
   - D: First semester demand
   - D_half: Second semester demand
-  - σ: First semester volatility
+  - sigma: First semester volatility
   - sigma_half: Second semester volatility
   - I: Initial investment
   - Delta_I: Investment revision
@@ -57,11 +57,11 @@ function construct_estimation_panel(histories::Vector{FirmHistory})
                 K = hist.K[year],
                 D = hist.D[year],
                 D_half = hist.D_half[year],
-                σ = hist.σ[year],
+                sigma = hist.sigma[year],
                 sigma_half = hist.sigma_half[year],
                 log_D = log(hist.D[year]),
                 log_D_half = log(hist.D_half[year]),
-                log_sigma = log(hist.σ[year]),
+                log_sigma = log(hist.sigma[year]),
                 log_sigma_half = log(hist.sigma_half[year]),
                 I = hist.I[year],
                 Delta_I = hist.Delta_I[year],
@@ -105,8 +105,8 @@ function panel_summary_statistics(panel::FirmPanel)
         D_mean = mean(df.D),
         D_std = std(df.D),
         # Volatility
-        sigma_mean = mean(df.σ),
-        sigma_std = std(df.σ),
+        sigma_mean = mean(df.sigma),
+        sigma_std = std(df.sigma),
         # Profit
         profit_mean = mean(df.profit),
         profit_std = std(df.profit)

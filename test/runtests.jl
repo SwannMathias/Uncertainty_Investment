@@ -1,7 +1,7 @@
 using Test
-using OptimalInvestment
+using UncertaintyInvestment
 
-@testset "OptimalInvestment.jl" begin
+@testset "UncertaintyInvestment.jl" begin
     @testset "Parameters" begin
         # Test parameter construction
         params = ModelParameters(alpha=0.33, epsilon=4.0, delta=0.10, beta=0.96)
@@ -56,7 +56,7 @@ using OptimalInvestment
         @test is_differentiable(ac)
 
         # Convex cost
-        ac = ConvexAdjustmentCost(ϕ=2.0)
+        ac = ConvexAdjustmentCost(phi=2.0)
         cost = compute_cost(ac, 0.1, 0.0, 1.0)
         @test cost > 0.0
         @test !has_fixed_cost(ac)
@@ -70,7 +70,7 @@ using OptimalInvestment
         # Composite cost
         ac = CompositeAdjustmentCost(
             FixedAdjustmentCost(F=0.1),
-            ConvexAdjustmentCost(ϕ=1.0)
+            ConvexAdjustmentCost(phi=1.0)
         )
         @test has_fixed_cost(ac)
     end
@@ -78,23 +78,23 @@ using OptimalInvestment
     @testset "Stochastic Processes" begin
         # Rouwenhorst
         n = 7
-        ρ = 0.9
-        σ = 0.1
-        μ = 0.0
+        rho = 0.9
+        sigma = 0.1
+        mu = 0.0
 
-        grid, Pi = rouwenhorst(n, ρ, σ; μ=μ)
+        grid, Pi = rouwenhorst(n, rho, sigma; mu=mu)
         @test length(grid) == n
         @test size(Pi) == (n, n)
         @test is_valid_probability_matrix(Pi)
 
         # Verify moments
-        moments = verify_discretization(grid, Pi, ρ, σ; μ=μ)
+        moments = verify_discretization(grid, Pi, rho, sigma; mu=mu)
         @test moments.mean_error < 0.1
         @test moments.std_error < 0.1
         @test moments.autocorr_error < 0.1
 
         # Tauchen
-        grid_t, Pi_t = tauchen(n, ρ, σ; μ=μ)
+        grid_t, Pi_t = tauchen(n, rho, sigma; mu=mu)
         @test length(grid_t) == n
         @test is_valid_probability_matrix(Pi_t)
     end
@@ -158,9 +158,9 @@ using OptimalInvestment
         @test shocks.n_firms == 10
         @test shocks.T == 20
         @test size(shocks.D) == (10, 20)
-        @test size(shocks.σ) == (10, 20)
+        @test size(shocks.sigma) == (10, 20)
         @test all(isfinite.(shocks.D))
-        @test all(isfinite.(shocks.σ))
+        @test all(isfinite.(shocks.sigma))
     end
 
     @testset "Numerical Utilities" begin

@@ -70,14 +70,14 @@ is_differentiable(::NoAdjustmentCost) = true
     ConvexAdjustmentCost
 
 Standard quadratic adjustment cost on total investment:
-C(I, Delta_I, K) = (ϕ/2) * ((I + Delta_I) / K)^2 * K
+C(I, Delta_I, K) = (phi/2) * ((I + Delta_I) / K)^2 * K
 """
 @with_kw struct ConvexAdjustmentCost <: AbstractAdjustmentCost
-    ϕ::Float64 = 1.0
+    phi::Float64 = 1.0
 
-    function ConvexAdjustmentCost(ϕ)
-        @assert ϕ >= 0.0 "ϕ must be non-negative"
-        new(ϕ)
+    function ConvexAdjustmentCost(phi)
+        @assert phi >= 0.0 "phi must be non-negative"
+        new(phi)
     end
 end
 
@@ -121,17 +121,17 @@ C(I, Delta_I, K) = (phi_1/2) * (I/K)^2 * K + (phi_2/2) * (Delta_I/K)^2 * K
 end
 
 function compute_cost(ac::SeparateConvexCost, I, Delta_I, K)
-    cost_I = 0.5 * ac.phi₁ * (I / K)^2 * K
-    cost_Delta_I = 0.5 * ac.phi₂ * (Delta_I / K)^2 * K
+    cost_I = 0.5 * ac.phi_1 * (I / K)^2 * K
+    cost_Delta_I = 0.5 * ac.phi_2 * (Delta_I / K)^2 * K
     return cost_I + cost_Delta_I
 end
 
 function marginal_cost_I(ac::SeparateConvexCost, I, Delta_I, K)
-    return ac.phi₁ * (I / K)
+    return ac.phi_1 * (I / K)
 end
 
 function marginal_cost_Delta_I(ac::SeparateConvexCost, I, Delta_I, K)
-    return ac.phi₂ * (Delta_I / K)
+    return ac.phi_2 * (Delta_I / K)
 end
 
 has_fixed_cost(::SeparateConvexCost) = false
@@ -183,7 +183,7 @@ is_differentiable(::FixedAdjustmentCost) = false
     AsymmetricAdjustmentCost
 
 Different convex costs for positive vs negative net investment:
-C(I, Delta_I, K) = ϕ⁺ * (I_total^+)^2 / K + ϕ⁻ * (I_total^-)^2 / K
+C(I, Delta_I, K) = phi_plus * (I_total^+)^2 / K + phi_minus * (I_total^-)^2 / K
 
 where I_total^+ = max(I_total, 0) and I_total^- = max(-I_total, 0).
 """
@@ -333,11 +333,11 @@ function describe_adjustment_cost(ac::AbstractAdjustmentCost)
     elseif ac isa ConvexAdjustmentCost
         return "Convex: ($(ac.phi)/2) * (I_total/K)²"
     elseif ac isa SeparateConvexCost
-        return "Separate convex: phi_1=$(ac.phi₁) (initial), phi_2=$(ac.phi₂) (revision)"
+        return "Separate convex: phi_1=$(ac.phi_1) (initial), phi_2=$(ac.phi_2) (revision)"
     elseif ac isa FixedAdjustmentCost
         return "Fixed cost: F=$(ac.F)"
     elseif ac isa AsymmetricAdjustmentCost
-        return "Asymmetric: ϕ⁺=$(ac.phi_plus), ϕ⁻=$(ac.phi_minus)"
+        return "Asymmetric: phi_plus=$(ac.phi_plus), phi_minus=$(ac.phi_minus)"
     elseif ac isa PartialIrreversibility
         return "Partial irreversibility: resale price=$(ac.p_S)"
     elseif ac isa CompositeAdjustmentCost

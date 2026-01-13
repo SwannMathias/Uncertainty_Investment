@@ -1,5 +1,5 @@
 """
-    OptimalInvestment
+    UncertaintyInvestment
 
 Julia package for solving and estimating dynamic investment models with stochastic volatility.
 
@@ -12,13 +12,13 @@ Julia package for solving and estimating dynamic investment models with stochast
 
 # Quick Start
 ```julia
-using OptimalInvestment
+using UncertaintyInvestment
 
 # Define parameters
-params = ModelParameters(α=0.33, ε=4.0, δ=0.10, β=0.96)
+params = ModelParameters(alpha=0.33, epsilon=4.0, delta=0.10, beta=0.96)
 
 # Solve model
-sol = solve_model(params; ac=ConvexAdjustmentCost(ϕ=2.0))
+sol = solve_model(params; ac=ConvexAdjustmentCost(phi=2.0))
 
 # Simulate firms
 shocks = generate_shock_panel(params.demand, params.volatility, 1000, 120)
@@ -26,7 +26,7 @@ histories = simulate_firm_panel(sol, shocks; K_init=1.0, T_years=50)
 panel = construct_estimation_panel(histories)
 ```
 """
-module OptimalInvestment
+module UncertaintyInvestment
 
 # External dependencies
 using Parameters
@@ -149,7 +149,7 @@ Return citation information.
 """
 function cite()
     println("""
-    OptimalInvestment.jl
+    UncertaintyInvestment.jl
 
     A Julia package for solving and estimating dynamic investment models
     with stochastic volatility and adjustment costs.
@@ -159,4 +159,4 @@ function cite()
     """)
 end
 
-end # module OptimalInvestment
+end # module UncertaintyInvestment
