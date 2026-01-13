@@ -13,10 +13,24 @@ A comprehensive Julia package for solving and estimating dynamic investment mode
 
 ## Installation
 
+### Quick Start (Recommended)
+
+Simply run the main calibration script—it will handle setup automatically:
+
+```bash
+julia run_calibration.jl
+```
+
+On first run, this will automatically install all dependencies.
+
+### Manual Setup
+
+If you want to use the package interactively:
+
 ```julia
 # From the repository directory
 using Pkg
-Pkg.activate("UncertaintyInvestment")
+Pkg.activate(".")
 Pkg.instantiate()
 
 # Load the package
@@ -201,9 +215,37 @@ W(K', D, sigma) = E{ max_Delta_I { pi(K,D_1/2) - C_2(Delta_I,K) + beta E[V(K'', 
 
 See the `scripts/` directory for complete examples:
 
-- `solve_baseline.jl`: Solve baseline model
-- `run_simulation.jl`: Generate simulated data
-- `comparative_statics.jl`: Parameter sensitivity analysis
+- `solve_baseline.jl`: Solve baseline model with various adjustment costs
+- `run_simulation.jl`: Generate simulated data (coming soon)
+- `comparative_statics.jl`: Parameter sensitivity analysis (coming soon)
+
+### Running Scripts
+
+The easiest way to run scripts is using the main runner:
+
+```bash
+# Run the baseline calibration (solves model with all adjustment cost types)
+julia run_calibration.jl
+
+# Or explicitly specify the script name
+julia run_calibration.jl solve_baseline
+```
+
+The runner script will automatically:
+1. Activate the project environment
+2. Install dependencies if needed (first time only)
+3. Execute the requested script
+
+Alternatively, run scripts directly:
+
+```bash
+# From the repository root
+julia scripts/solve_baseline.jl
+```
+
+The scripts will create output in the `output/` directory:
+- `output/solutions/`: Saved model solutions (.jld2 files)
+- `output/solutions/*/`: CSV exports of policy functions and value functions
 
 ## Project Structure
 
