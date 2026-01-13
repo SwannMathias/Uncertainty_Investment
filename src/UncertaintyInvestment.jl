@@ -114,6 +114,13 @@ export FirmPanel, construct_estimation_panel
 export panel_summary_statistics, print_panel_summary
 
 # ============================================================================
+# Estimation
+# ============================================================================
+
+include("estimation/types.jl")
+export EstimationResult
+
+# ============================================================================
 # Utilities
 # ============================================================================
 
@@ -129,6 +136,7 @@ include("utils/io.jl")
 export save_solution, load_solution
 export export_policy_to_csv, export_value_function_to_csv
 export save_simulation, load_simulation
+export save_estimation_results, load_estimation_results
 export export_to_csv, create_output_directories
 
 # ============================================================================
