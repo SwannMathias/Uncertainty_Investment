@@ -101,3 +101,48 @@ println("\nResults saved in:")
 println("  - output/solutions_fast/baseline_fast.jld2")
 println("\nNote: This is a FAST TEST VERSION with reduced grid resolution.")
 println("For production runs, use solve_baseline.jl with full parameters.")
+
+
+
+using Random
+
+# Set seed for reproducibility
+Random.seed!(12345)
+
+# Generate shock panel
+shocks = generate_shock_panel(
+    params.demand,
+    params.volatility,
+    1000,  # Number of firms
+    120    # Number of semesters
+)
+
+# Print shock statistics
+print_shock_statistics(shocks)
+
+# Simulate firm panel
+histories = simulate_firm_panel(
+    sol_baseline,
+    shocks;
+    K_init = 1.0,
+    T_years = 50
+)
+
+# Construct estimation panel
+panel = construct_estimation_panel(histories)
+print_panel_summary(panel)
+
+# Save simulation
+save_simulation("output/simulations/panel_data.csv", panel)
+
+# Evaluate value and policy at arbitrary points
+K = 1.0
+D = 1.0
+sigma = 0.1
+
+V_val = evaluate_value(sol_ac, K, D, sigma)
+I_opt = evaluate_policy(sol_ac, K, D, sigma)
+
+println("At (K=$K, D=$D, sigma=$sigma):")
+println("  Value: $V_val")
+println("  Optimal investment: $I_opt")

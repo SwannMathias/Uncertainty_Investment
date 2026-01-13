@@ -60,7 +60,7 @@ params = ModelParameters(
 
     # Numerical settings
     numerical = NumericalSettings(
-        n_K = 100,           # Capital grid points
+        n_K = 50,           # Capital grid points
         n_D = 15,            # Demand states
         n_sigma = 7,             # Volatility states
         K_min_factor = 0.1,
