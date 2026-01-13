@@ -328,8 +328,12 @@ function format_number(x::Float64; digits=4)
     if abs(x) < 1e-10
         return "0.0"
     elseif abs(x) >= 1e4 || abs(x) < 1e-3
-        return @sprintf("%.$(digits)e", x)
+        # Use Printf.Format for runtime format string construction
+        fmt = Printf.Format("%.$(digits)e")
+        return Printf.format(fmt, x)
     else
-        return @sprintf("%.$(digits)f", x)
+        # Use Printf.Format for runtime format string construction
+        fmt = Printf.Format("%.$(digits)f")
+        return Printf.format(fmt, x)
     end
 end
