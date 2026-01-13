@@ -26,7 +26,7 @@ function profit(K::Float64, D::Float64, derived::DerivedParameters)
     @assert K > 0.0 "Capital must be positive"
     @assert D > 0.0 "Demand must be positive"
 
-    γ = derived.γ
+    γ = derived.gamma
     h = derived.h
 
     return (h / (1 - γ)) * D^γ * K^(1 - γ)
@@ -51,7 +51,7 @@ function marginal_product_capital(K::Float64, D::Float64, derived::DerivedParame
     @assert K > 0.0 "Capital must be positive"
     @assert D > 0.0 "Demand must be positive"
 
-    γ = derived.γ
+    γ = derived.gamma
     h = derived.h
 
     return h * D^γ * K^(-γ)
@@ -84,7 +84,7 @@ function profit_derivative_D(K::Float64, D::Float64, derived::DerivedParameters)
     @assert K > 0.0 "Capital must be positive"
     @assert D > 0.0 "Demand must be positive"
 
-    γ = derived.γ
+    γ = derived.gamma
     h = derived.h
 
     return (h * γ / (1 - γ)) * D^(γ - 1) * K^(1 - γ)
@@ -111,7 +111,7 @@ function profit_second_derivative_K(K::Float64, D::Float64, derived::DerivedPara
     @assert K > 0.0 "Capital must be positive"
     @assert D > 0.0 "Demand must be positive"
 
-    γ = derived.γ
+    γ = derived.gamma
     h = derived.h
 
     return -γ * h * D^γ * K^(-γ - 1)
@@ -137,15 +137,15 @@ Compute annual profit from two semesters.
 function annual_profit(K::Float64, D_first::Float64, D_second::Float64,
                        derived::DerivedParameters;
                        aggregation::Symbol=:sum)
-    π1 = profit(K, D_first, derived)
-    π2 = profit(K, D_second, derived)
+    pi1 = profit(K, D_first, derived)
+    pi2 = profit(K, D_second, derived)
 
     if aggregation == :sum
-        return π1 + π2
+        return pi1 + pi2
     elseif aggregation == :mean
-        return (π1 + π2) / 2
+        return (pi1 + pi2) / 2
     elseif aggregation == :geometric_mean
-        return sqrt(π1 * π2)
+        return sqrt(pi1 * pi2)
     else
         error("Unknown aggregation method: $aggregation")
     end
@@ -172,7 +172,7 @@ function optimal_capital_static(D::Float64, user_cost::Float64, derived::Derived
     @assert D > 0.0 "Demand must be positive"
     @assert user_cost > 0.0 "User cost must be positive"
 
-    γ = derived.γ
+    γ = derived.gamma
     h = derived.h
 
     return (h * D^γ / user_cost)^(1 / γ)
@@ -236,15 +236,15 @@ function check_profit_properties(derived::DerivedParameters; K_test=1.0, D_test=
     end
 
     # 3. Concave in K
-    d2π_dK2 = profit_second_derivative_K(K_test, D_test, derived)
-    if d2π_dK2 >= 0
-        @warn "Profit is not concave in K: ∂²π/∂K² = $d2π_dK2"
+    d2pi_dK2 = profit_second_derivative_K(K_test, D_test, derived)
+    if d2pi_dK2 >= 0
+        @warn "Profit is not concave in K: ∂²π/∂K² = $d2pi_dK2"
         all_pass = false
     end
 
     # 4. Elasticity w.r.t. K should equal 1 - γ
     ε_K = profit_elasticity_K(K_test, D_test, derived)
-    expected_ε_K = 1 - derived.γ
+    expected_ε_K = 1 - derived.gamma
     if !isapprox(ε_K, expected_ε_K, rtol=1e-6)
         @warn "Capital elasticity incorrect: got $ε_K, expected $expected_ε_K"
         all_pass = false
@@ -252,7 +252,7 @@ function check_profit_properties(derived::DerivedParameters; K_test=1.0, D_test=
 
     # 5. Elasticity w.r.t. D should equal γ
     ε_D = profit_elasticity_D(K_test, D_test, derived)
-    expected_ε_D = derived.γ
+    expected_ε_D = derived.gamma
     if !isapprox(ε_D, expected_ε_D, rtol=1e-6)
         @warn "Demand elasticity incorrect: got $ε_D, expected $expected_ε_D"
         all_pass = false

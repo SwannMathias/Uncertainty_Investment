@@ -29,7 +29,7 @@ function save_solution(filename::String, sol::SolvedModel)
             ac = sol.ac,
             V = sol.V,
             I_policy = sol.I_policy,
-            ΔI_policy = sol.ΔI_policy,
+            Delta_I_policy = sol.Delta_I_policy,
             convergence = sol.convergence)
 
     println("Solution saved to: $filename")
@@ -58,7 +58,7 @@ function load_solution(filename::String)
         data["ac"],
         data["V"],
         data["I_policy"],
-        data["ΔI_policy"],
+        data["Delta_I_policy"],
         data["convergence"]
     )
 end
@@ -91,23 +91,23 @@ function export_policy_to_csv(sol::SolvedModel, filename::String; subset_K=nothi
     for i_K in K_indices
         K = get_K(grids, i_K)
 
-        for i_σ in 1:grids.n_σ
-            σ_level = get_σ(grids, i_σ)
-            log_σ = get_log_σ(grids, i_σ)
+        for i_sigma in 1:grids.n_sigma
+            sigma_level = get_sigma(grids, i_sigma)
+            log_sigma = get_log_sigma(grids, i_sigma)
 
             for i_D in 1:grids.n_D
                 D_level = get_D(grids, i_D)
                 log_D = get_log_D(grids, i_D)
 
-                I_initial = sol.I_policy[i_K, i_D, i_σ]
-                V_value = sol.V[i_K, i_D, i_σ]
+                I_initial = sol.I_policy[i_K, i_D, i_sigma]
+                V_value = sol.V[i_K, i_D, i_sigma]
 
                 push!(rows, (
                     K = K,
                     D = D_level,
-                    σ = σ_level,
+                    σ = sigma_level,
                     log_D = log_D,
-                    log_σ = log_σ,
+                    log_sigma = log_sigma,
                     I_initial = I_initial,
                     V = V_value
                 ))
@@ -206,8 +206,8 @@ function save_estimation_results(filename::String, result::EstimationResult)
             objective_value = result.objective_value,
             convergence = result.convergence,
             iterations = result.iterations,
-            β_sim = result.β_sim,
-            β_data = result.β_data,
+            β_sim = result.beta_sim,
+            β_data = result.beta_data,
             W = result.W)
 
     println("Estimation results saved to:")
@@ -279,12 +279,12 @@ function export_to_csv(sol::SolvedModel, output_dir::String)
     # Export demand/volatility grids
     dv_file = joinpath(output_dir, "demand_volatility_grids.csv")
     df_dv = DataFrame(
-        i_D = repeat(1:sol.grids.n_D, outer=sol.grids.n_σ),
-        i_σ = repeat(1:sol.grids.n_σ, inner=sol.grids.n_D),
-        log_D = repeat(sol.grids.sv.D_grid, outer=sol.grids.n_σ),
-        log_σ = repeat(sol.grids.sv.σ_grid, inner=sol.grids.n_D),
-        D = exp.(repeat(sol.grids.sv.D_grid, outer=sol.grids.n_σ)),
-        σ = exp.(repeat(sol.grids.sv.σ_grid, inner=sol.grids.n_D))
+        i_D = repeat(1:sol.grids.n_D, outer=sol.grids.n_sigma),
+        i_sigma = repeat(1:sol.grids.n_sigma, inner=sol.grids.n_D),
+        log_D = repeat(sol.grids.sv.D_grid, outer=sol.grids.n_sigma),
+        log_sigma = repeat(sol.grids.sv.sigma_grid, inner=sol.grids.n_D),
+        D = exp.(repeat(sol.grids.sv.D_grid, outer=sol.grids.n_sigma)),
+        σ = exp.(repeat(sol.grids.sv.sigma_grid, inner=sol.grids.n_D))
     )
     CSV.write(dv_file, df_dv)
 

@@ -31,13 +31,13 @@ Convert simulated firm histories into panel DataFrame.
   - D: First semester demand
   - D_half: Second semester demand
   - σ: First semester volatility
-  - σ_half: Second semester volatility
+  - sigma_half: Second semester volatility
   - I: Initial investment
-  - ΔI: Investment revision
+  - Delta_I: Investment revision
   - I_total: Total investment
   - I_rate: Investment rate (I_total / K)
   - profit: Annual profit
-  - log_D, log_σ: Log states
+  - log_D, log_sigma: Log states
 """
 function construct_estimation_panel(histories::Vector{FirmHistory})
     n_firms = length(histories)
@@ -58,13 +58,13 @@ function construct_estimation_panel(histories::Vector{FirmHistory})
                 D = hist.D[year],
                 D_half = hist.D_half[year],
                 σ = hist.σ[year],
-                σ_half = hist.σ_half[year],
+                sigma_half = hist.sigma_half[year],
                 log_D = log(hist.D[year]),
                 log_D_half = log(hist.D_half[year]),
-                log_σ = log(hist.σ[year]),
-                log_σ_half = log(hist.σ_half[year]),
+                log_sigma = log(hist.σ[year]),
+                log_sigma_half = log(hist.sigma_half[year]),
                 I = hist.I[year],
-                ΔI = hist.ΔI[year],
+                Delta_I = hist.Delta_I[year],
                 I_total = hist.I_total[year],
                 I_rate = hist.I_total[year] / hist.K[year],
                 profit = hist.profit[year]
@@ -105,8 +105,8 @@ function panel_summary_statistics(panel::FirmPanel)
         D_mean = mean(df.D),
         D_std = std(df.D),
         # Volatility
-        σ_mean = mean(df.σ),
-        σ_std = std(df.σ),
+        sigma_mean = mean(df.σ),
+        sigma_std = std(df.σ),
         # Profit
         profit_mean = mean(df.profit),
         profit_std = std(df.profit)
@@ -146,8 +146,8 @@ function print_panel_summary(panel::FirmPanel)
     println("  Std Dev: $(format_number(stats.D_std))")
 
     println("\nVolatility:")
-    println("  Mean: $(format_number(stats.σ_mean, digits=4))")
-    println("  Std Dev: $(format_number(stats.σ_std, digits=4))")
+    println("  Mean: $(format_number(stats.sigma_mean, digits=4))")
+    println("  Std Dev: $(format_number(stats.sigma_std, digits=4))")
 
     println("\nProfit:")
     println("  Mean: $(format_number(stats.profit_mean))")

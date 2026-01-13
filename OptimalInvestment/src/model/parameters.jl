@@ -2,15 +2,15 @@
     DemandProcess
 
 Autoregressive demand process parameters at semester frequency.
-Log demand evolves as: log D_{s+1/2} = μ_D(1-ρ_D) + ρ_D log D_s + σ_s ε_{s+1/2}
+Log demand evolves as: log D_{s+1/2} = mu_D(1-rho_D) + rho_D log D_s + sigma_s epsilon_{s+1/2}
 """
 @with_kw struct DemandProcess
-    μ_D::Float64 = 0.0       # Long-run mean of log demand
-    ρ_D::Float64 = 0.9       # Persistence (semester)
+    mu_D::Float64 = 0.0       # Long-run mean of log demand
+    rho_D::Float64 = 0.9       # Persistence (semester)
 
-    function DemandProcess(μ_D, ρ_D)
-        @assert 0.0 <= ρ_D < 1.0 "ρ_D must be in [0, 1)"
-        new(μ_D, ρ_D)
+    function DemandProcess(mu_D, rho_D)
+        @assert 0.0 <= rho_D < 1.0 "rho_D must be in [0, 1)"
+        new(mu_D, rho_D)
     end
 end
 
@@ -18,19 +18,19 @@ end
     VolatilityProcess
 
 Stochastic volatility process parameters at semester frequency.
-Log volatility evolves as: log σ_{s+1/2} = σ̄(1-ρ_σ) + ρ_σ log σ_s + σ_η η_{s+1/2}
+Log volatility evolves as: log sigma_{s+1/2} = sigma_bar(1-rho_sigma) + rho_sigma log sigma_s + sigma_eta eta_{s+1/2}
 """
 @with_kw struct VolatilityProcess
-    σ̄::Float64 = log(0.1)    # Long-run mean of log volatility
-    ρ_σ::Float64 = 0.95      # Persistence (semester)
-    σ_η::Float64 = 0.1       # Volatility of volatility
-    ρ_εη::Float64 = 0.0      # Correlation between demand and volatility shocks
+    sigma_bar::Float64 = log(0.1)    # Long-run mean of log volatility
+    rho_sigma::Float64 = 0.95      # Persistence (semester)
+    sigma_eta::Float64 = 0.1       # Volatility of volatility
+    rho_epsilon_eta::Float64 = 0.0      # Correlation between demand and volatility shocks
 
-    function VolatilityProcess(σ̄, ρ_σ, σ_η, ρ_εη)
-        @assert 0.0 <= ρ_σ < 1.0 "ρ_σ must be in [0, 1)"
-        @assert σ_η > 0.0 "σ_η must be positive"
-        @assert -1.0 <= ρ_εη <= 1.0 "ρ_εη must be in [-1, 1]"
-        new(σ̄, ρ_σ, σ_η, ρ_εη)
+    function VolatilityProcess(sigma_bar, rho_sigma, sigma_eta, rho_epsilon_eta)
+        @assert 0.0 <= rho_sigma < 1.0 "rho_sigma must be in [0, 1)"
+        @assert sigma_eta > 0.0 "sigma_eta must be positive"
+        @assert -1.0 <= rho_epsilon_eta <= 1.0 "rho_epsilon_eta must be in [-1, 1]"
+        new(sigma_bar, rho_sigma, sigma_eta, rho_epsilon_eta)
     end
 end
 
@@ -43,7 +43,7 @@ Numerical solution parameters including grid sizes and convergence tolerances.
     # Grid sizes
     n_K::Int = 100           # Capital grid points
     n_D::Int = 15            # Demand states
-    n_σ::Int = 7             # Volatility states
+    n_sigma::Int = 7             # Volatility states
 
     # Grid bounds (relative to steady state)
     K_min_factor::Float64 = 0.1   # K_min = K_ss * factor
@@ -60,18 +60,18 @@ Numerical solution parameters including grid sizes and convergence tolerances.
     # Interpolation
     interp_method::Symbol = :linear  # :linear or :cubic
 
-    function NumericalSettings(n_K, n_D, n_σ, K_min_factor, K_max_factor,
+    function NumericalSettings(n_K, n_D, n_sigma, K_min_factor, K_max_factor,
                                tol_vfi, tol_policy, max_iter, howard_steps, interp_method)
         @assert n_K > 0 "n_K must be positive"
         @assert n_D > 0 "n_D must be positive"
-        @assert n_σ > 0 "n_σ must be positive"
+        @assert n_sigma > 0 "n_sigma must be positive"
         @assert 0.0 < K_min_factor < K_max_factor "Invalid K bounds"
         @assert tol_vfi > 0.0 "tol_vfi must be positive"
         @assert tol_policy > 0.0 "tol_policy must be positive"
         @assert max_iter > 0 "max_iter must be positive"
         @assert howard_steps >= 0 "howard_steps must be non-negative"
         @assert interp_method in [:linear, :cubic] "Invalid interpolation method"
-        new(n_K, n_D, n_σ, K_min_factor, K_max_factor, tol_vfi, tol_policy,
+        new(n_K, n_D, n_sigma, K_min_factor, K_max_factor, tol_vfi, tol_policy,
             max_iter, howard_steps, interp_method)
     end
 end
@@ -83,12 +83,12 @@ Main parameter structure containing all model primitives.
 """
 @with_kw struct ModelParameters
     # Technology
-    α::Float64 = 0.33        # Capital share in production
-    ε::Float64 = 4.0         # Demand elasticity (must be > 1)
-    δ::Float64 = 0.10        # Annual depreciation rate
+    alpha::Float64 = 0.33        # Capital share in production
+    epsilon::Float64 = 4.0         # Demand elasticity (must be > 1)
+    delta::Float64 = 0.10        # Annual depreciation rate
 
     # Preferences
-    β::Float64 = 0.96        # Annual discount factor
+    beta::Float64 = 0.96        # Annual discount factor
 
     # Stochastic processes
     demand::DemandProcess = DemandProcess()
@@ -97,12 +97,12 @@ Main parameter structure containing all model primitives.
     # Numerical settings
     numerical::NumericalSettings = NumericalSettings()
 
-    function ModelParameters(α, ε, δ, β, demand, volatility, numerical)
-        @assert 0.0 < α < 1.0 "α must be in (0, 1)"
-        @assert ε > 1.0 "ε must be > 1 for positive profits"
-        @assert 0.0 < δ < 1.0 "δ must be in (0, 1)"
-        @assert 0.0 < β < 1.0 "β must be in (0, 1)"
-        new(α, ε, δ, β, demand, volatility, numerical)
+    function ModelParameters(alpha, epsilon, delta, beta, demand, volatility, numerical)
+        @assert 0.0 < alpha < 1.0 "alpha must be in (0, 1)"
+        @assert epsilon > 1.0 "epsilon must be > 1 for positive profits"
+        @assert 0.0 < delta < 1.0 "delta must be in (0, 1)"
+        @assert 0.0 < beta < 1.0 "beta must be in (0, 1)"
+        new(alpha, epsilon, delta, beta, demand, volatility, numerical)
     end
 end
 
@@ -113,10 +113,10 @@ Derived parameters computed from ModelParameters.
 These are calculated once and reused throughout the solution.
 """
 struct DerivedParameters
-    γ::Float64               # Profit function demand exponent
+    gamma::Float64               # Profit function demand exponent
     h::Float64               # Profit function scale parameter
-    δ_semester::Float64      # Semester depreciation rate
-    β_semester::Float64      # Semester discount factor
+    delta_semester::Float64      # Semester depreciation rate
+    beta_semester::Float64      # Semester discount factor
     K_ss::Float64            # Steady-state capital (no uncertainty)
 end
 
@@ -126,37 +126,37 @@ end
 Compute derived parameters from primitive parameters.
 
 # Formulas
-- γ = (ε - 1) / (ε - (1 - α))
-- h = α * (1 - 1/ε)^(ε/α) * (1 - α)^(ε/α - 1)
-- δ_semester = 1 - (1 - δ)^(1/2)
-- β_semester = β^(1/2)
-- K_ss computed from first-order condition: MPK = δ/β
+- gamma = (epsilon - 1) / (epsilon - (1 - alpha))
+- h = alpha * (1 - 1/epsilon)^(epsilon/alpha) * (1 - alpha)^(epsilon/alpha - 1)
+- delta_semester = 1 - (1 - delta)^(1/2)
+- beta_semester = beta^(1/2)
+- K_ss computed from first-order condition: MPK = delta/beta
 """
 function get_derived_parameters(p::ModelParameters)
     # Profit function exponents from iso-elastic demand and Cobb-Douglas technology
-    γ = (p.ε - 1) / (p.ε - (1 - p.α))
+    gamma = (p.epsilon - 1) / (p.epsilon - (1 - p.alpha))
 
     # Scale parameter h
-    term1 = p.α
-    term2 = (1 - 1/p.ε)^(p.ε / p.α)
-    term3 = (1 - p.α)^(p.ε / p.α - 1)
+    term1 = p.alpha
+    term2 = (1 - 1/p.epsilon)^(p.epsilon / p.alpha)
+    term3 = (1 - p.alpha)^(p.epsilon / p.alpha - 1)
     h = term1 * term2 * term3
 
     # Convert annual rates to semester rates
-    δ_semester = 1 - (1 - p.δ)^(1/2)
-    β_semester = p.β^(1/2)
+    delta_semester = 1 - (1 - p.delta)^(1/2)
+    beta_semester = p.beta^(1/2)
 
     # Steady-state capital (deterministic case)
-    # From FOC: MPK = δ/β => (1-γ) * h * D_ss^γ * K_ss^(-γ) = δ/β
-    # With D_ss = exp(μ_D), solve for K_ss
-    D_ss = exp(p.demand.μ_D)
-    user_cost = p.δ / p.β
+    # From FOC: MPK = delta/beta => (1-gamma) * h * D_ss^gamma * K_ss^(-gamma) = delta/beta
+    # With D_ss = exp(mu_D), solve for K_ss
+    D_ss = exp(p.demand.mu_D)
+    user_cost = p.delta / p.beta
 
-    # MPK = (1 - γ) * h * D^γ * K^(-γ)
-    # K_ss = [(1 - γ) * h * D_ss^γ / user_cost]^(1/γ)
-    K_ss = ((1 - γ) * h * D_ss^γ / user_cost)^(1/γ)
+    # MPK = (1 - gamma) * h * D^gamma * K^(-gamma)
+    # K_ss = [(1 - gamma) * h * D_ss^gamma / user_cost]^(1/gamma)
+    K_ss = ((1 - gamma) * h * D_ss^gamma / user_cost)^(1/gamma)
 
-    return DerivedParameters(γ, h, δ_semester, β_semester, K_ss)
+    return DerivedParameters(gamma, h, delta_semester, beta_semester, K_ss)
 end
 
 """
@@ -168,8 +168,8 @@ function validate_parameters(p::ModelParameters)
     # Check that profit function exponent is well-defined
     derived = get_derived_parameters(p)
 
-    if derived.γ <= 0.0 || derived.γ >= 1.0
-        @warn "Profit function exponent γ = $(derived.γ) is outside (0,1). This may cause numerical issues."
+    if derived.gamma <= 0.0 || derived.gamma >= 1.0
+        @warn "Profit function exponent gamma = $(derived.gamma) is outside (0,1). This may cause numerical issues."
         return false
     end
 
@@ -202,30 +202,30 @@ function print_parameters(p::ModelParameters)
     println("Model Parameters")
     println("=" ^ 60)
     println("\nTechnology:")
-    println("  α (capital share)      = $(p.α)")
-    println("  ε (demand elasticity)  = $(p.ε)")
-    println("  δ (annual depreciation) = $(p.δ)")
-    println("  β (annual discount)    = $(p.β)")
+    println("  alpha (capital share)      = $(p.alpha)")
+    println("  epsilon (demand elasticity)  = $(p.epsilon)")
+    println("  delta (annual depreciation) = $(p.delta)")
+    println("  beta (annual discount)    = $(p.beta)")
 
     println("\nDemand Process (semester frequency):")
-    println("  μ_D (mean log demand)  = $(p.demand.μ_D)")
-    println("  ρ_D (persistence)      = $(p.demand.ρ_D)")
+    println("  mu_D (mean log demand)  = $(p.demand.mu_D)")
+    println("  rho_D (persistence)      = $(p.demand.rho_D)")
 
     println("\nVolatility Process (semester frequency):")
-    println("  σ̄ (mean log vol)       = $(p.volatility.σ̄)")
-    println("  ρ_σ (persistence)      = $(p.volatility.ρ_σ)")
-    println("  σ_η (vol of vol)       = $(p.volatility.σ_η)")
-    println("  ρ_εη (correlation)     = $(p.volatility.ρ_εη)")
+    println("  sigma_bar (mean log vol)       = $(p.volatility.sigma_bar)")
+    println("  rho_sigma (persistence)      = $(p.volatility.rho_sigma)")
+    println("  sigma_eta (vol of vol)       = $(p.volatility.sigma_eta)")
+    println("  rho_epsilon_eta (correlation)     = $(p.volatility.rho_epsilon_eta)")
 
     println("\nDerived Parameters:")
-    println("  γ (profit exponent)    = $(round(derived.γ, digits=4))")
+    println("  gamma (profit exponent)    = $(round(derived.gamma, digits=4))")
     println("  h (scale parameter)    = $(round(derived.h, digits=4))")
-    println("  δ_semester             = $(round(derived.δ_semester, digits=4))")
-    println("  β_semester             = $(round(derived.β_semester, digits=4))")
+    println("  delta_semester             = $(round(derived.delta_semester, digits=4))")
+    println("  beta_semester             = $(round(derived.beta_semester, digits=4))")
     println("  K_ss (steady state)    = $(round(derived.K_ss, digits=4))")
 
     println("\nNumerical Settings:")
-    println("  n_K × n_D × n_σ        = $(p.numerical.n_K) × $(p.numerical.n_D) × $(p.numerical.n_σ)")
+    println("  n_K × n_D × n_sigma        = $(p.numerical.n_K) × $(p.numerical.n_D) × $(p.numerical.n_sigma)")
     println("  K_min factor           = $(p.numerical.K_min_factor)")
     println("  K_max factor           = $(p.numerical.K_max_factor)")
     println("  VFI tolerance          = $(p.numerical.tol_vfi)")

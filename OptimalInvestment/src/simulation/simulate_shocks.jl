@@ -16,7 +16,7 @@ struct ShockPanel
     D::Matrix{Float64}            # Log demand [firm, semester]
     σ::Matrix{Float64}            # Log volatility [firm, semester]
     D_level::Matrix{Float64}      # Demand level [firm, semester]
-    σ_level::Matrix{Float64}      # Volatility level [firm, semester]
+    sigma_level::Matrix{Float64}      # Volatility level [firm, semester]
 end
 
 """
@@ -47,8 +47,8 @@ function simulate_ar1_path(ρ::Float64, σ::Float64, μ::Float64, T::Int;
 
     if isnothing(x0)
         # Draw from stationary distribution
-        σ_x = σ / sqrt(1 - ρ^2)
-        x[1] = μ + σ_x * randn(rng)
+        sigma_x = σ / sqrt(1 - ρ^2)
+        x[1] = μ + sigma_x * randn(rng)
     else
         x[1] = x0
     end
@@ -64,7 +64,7 @@ end
 
 """
     simulate_sv_path(demand::DemandProcess, vol::VolatilityProcess, T::Int;
-                     D0=nothing, σ0=nothing, rng=Random.GLOBAL_RNG) -> (Vector, Vector)
+                     D0=nothing, sigma0=nothing, rng=Random.GLOBAL_RNG) -> (Vector, Vector)
 
 Simulate paths for demand and stochastic volatility jointly.
 
@@ -73,36 +73,36 @@ Simulate paths for demand and stochastic volatility jointly.
 - `vol`: VolatilityProcess parameters
 - `T`: Length of path (in semesters)
 - `D0`: Initial log demand (default: stationary mean)
-- `σ0`: Initial log volatility (default: stationary mean)
+- `sigma0`: Initial log volatility (default: stationary mean)
 - `rng`: Random number generator
 
 # Returns
 - `D_path`: Log demand path (length T)
-- `σ_path`: Log volatility path (length T)
+- `sigma_path`: Log volatility path (length T)
 """
 function simulate_sv_path(demand::DemandProcess, vol::VolatilityProcess, T::Int;
-                         D0=nothing, σ0=nothing, rng=Random.GLOBAL_RNG)
+                         D0=nothing, sigma0=nothing, rng=Random.GLOBAL_RNG)
     # Initialize
     D_path = zeros(T)
-    σ_path = zeros(T)
+    sigma_path = zeros(T)
 
     # Initial values
     if isnothing(D0)
-        D_path[1] = demand.μ_D
+        D_path[1] = demand.mu_D
     else
         D_path[1] = D0
     end
 
-    if isnothing(σ0)
-        σ_path[1] = vol.σ̄
+    if isnothing(sigma0)
+        sigma_path[1] = vol.sigma_bar
     else
-        σ_path[1] = σ0
+        sigma_path[1] = sigma0
     end
 
     # Correlation structure
-    if abs(vol.ρ_εη) > 1e-10
+    if abs(vol.rho_epsilon_eta) > 1e-10
         # Correlated shocks
-        Σ = [1.0 vol.ρ_εη; vol.ρ_εη 1.0]
+        Σ = [1.0 vol.rho_epsilon_eta; vol.rho_epsilon_eta 1.0]
         mvn = MvNormal(zeros(2), Σ)
     else
         mvn = nothing
@@ -111,27 +111,27 @@ function simulate_sv_path(demand::DemandProcess, vol::VolatilityProcess, T::Int;
     # Simulate
     for t in 2:T
         # Current volatility level (for demand innovation)
-        σ_current = exp(σ_path[t-1])
+        sigma_current = exp(sigma_path[t-1])
 
         if isnothing(mvn)
             # Independent shocks
             ε_D = randn(rng)
-            ε_σ = randn(rng)
+            ε_sigma = randn(rng)
         else
             # Correlated shocks
             shocks = rand(rng, mvn)
             ε_D = shocks[1]
-            ε_σ = shocks[2]
+            ε_sigma = shocks[2]
         end
 
         # Update demand (volatility affects demand innovation)
-        D_path[t] = demand.μ_D * (1 - demand.ρ_D) + demand.ρ_D * D_path[t-1] + σ_current * ε_D
+        D_path[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * D_path[t-1] + sigma_current * ε_D
 
         # Update volatility
-        σ_path[t] = vol.σ̄ * (1 - vol.ρ_σ) + vol.ρ_σ * σ_path[t-1] + vol.σ_η * ε_σ
+        sigma_path[t] = vol.sigma_bar * (1 - vol.rho_sigma) + vol.rho_sigma * sigma_path[t-1] + vol.sigma_eta * ε_sigma
     end
 
-    return D_path, σ_path
+    return D_path, sigma_path
 end
 
 """
@@ -161,23 +161,23 @@ function generate_shock_panel(demand::DemandProcess, vol::VolatilityProcess,
 
     # Allocate storage
     D_log = zeros(n_firms, T)
-    σ_log = zeros(n_firms, T)
+    sigma_log = zeros(n_firms, T)
 
     # Simulate each firm
     for i in 1:n_firms
         # Simulate with burn-in
-        D_full, σ_full = simulate_sv_path(demand, vol, T + burn_in; rng=rng)
+        D_full, sigma_full = simulate_sv_path(demand, vol, T + burn_in; rng=rng)
 
         # Keep post-burn-in periods
         D_log[i, :] = D_full[(burn_in+1):end]
-        σ_log[i, :] = σ_full[(burn_in+1):end]
+        sigma_log[i, :] = sigma_full[(burn_in+1):end]
     end
 
     # Convert to levels
     D_level = exp.(D_log)
-    σ_level = exp.(σ_log)
+    sigma_level = exp.(sigma_log)
 
-    return ShockPanel(n_firms, T, D_log, σ_log, D_level, σ_level)
+    return ShockPanel(n_firms, T, D_log, sigma_log, D_level, sigma_level)
 end
 
 """
@@ -187,7 +187,7 @@ Extract shock paths for a single firm.
 
 # Returns
 - `D_path`: Log demand path
-- `σ_path`: Log volatility path
+- `sigma_path`: Log volatility path
 """
 function get_firm_shocks(panel::ShockPanel, firm_id::Int)
     @assert 1 <= firm_id <= panel.n_firms "firm_id out of range"
@@ -201,7 +201,7 @@ Extract shock paths for a single firm (in levels).
 """
 function get_firm_shocks_level(panel::ShockPanel, firm_id::Int)
     @assert 1 <= firm_id <= panel.n_firms "firm_id out of range"
-    return panel.D_level[firm_id, :], panel.σ_level[firm_id, :]
+    return panel.D_level[firm_id, :], panel.sigma_level[firm_id, :]
 end
 
 """
@@ -219,15 +219,15 @@ function shock_statistics(panel::ShockPanel)
         D_log_min = minimum(panel.D),
         D_log_max = maximum(panel.D),
         # Log volatility statistics
-        σ_log_mean = mean(panel.σ),
-        σ_log_std = std(panel.σ),
-        σ_log_min = minimum(panel.σ),
-        σ_log_max = maximum(panel.σ),
+        sigma_log_mean = mean(panel.σ),
+        sigma_log_std = std(panel.σ),
+        sigma_log_min = minimum(panel.σ),
+        sigma_log_max = maximum(panel.σ),
         # Level statistics
         D_level_mean = mean(panel.D_level),
         D_level_std = std(panel.D_level),
-        σ_level_mean = mean(panel.σ_level),
-        σ_level_std = std(panel.σ_level)
+        sigma_level_mean = mean(panel.sigma_level),
+        sigma_level_std = std(panel.sigma_level)
     )
 end
 
@@ -251,17 +251,17 @@ function print_shock_statistics(panel::ShockPanel)
     println("  Range: [$(format_number(stats.D_log_min)), $(format_number(stats.D_log_max))]")
 
     println("\nLog Volatility:")
-    println("  Mean: $(format_number(stats.σ_log_mean))")
-    println("  Std Dev: $(format_number(stats.σ_log_std))")
-    println("  Range: [$(format_number(stats.σ_log_min)), $(format_number(stats.σ_log_max))]")
+    println("  Mean: $(format_number(stats.sigma_log_mean))")
+    println("  Std Dev: $(format_number(stats.sigma_log_std))")
+    println("  Range: [$(format_number(stats.sigma_log_min)), $(format_number(stats.sigma_log_max))]")
 
     println("\nDemand Level:")
     println("  Mean: $(format_number(stats.D_level_mean))")
     println("  Std Dev: $(format_number(stats.D_level_std))")
 
     println("\nVolatility Level:")
-    println("  Mean: $(format_number(stats.σ_level_mean))")
-    println("  Std Dev: $(format_number(stats.σ_level_std))")
+    println("  Mean: $(format_number(stats.sigma_level_mean))")
+    println("  Std Dev: $(format_number(stats.sigma_level_std))")
 
     println("="^70)
 end
