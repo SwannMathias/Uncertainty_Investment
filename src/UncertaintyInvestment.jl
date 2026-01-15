@@ -98,6 +98,7 @@ export bellman_operator_parallel!, howard_improvement_step_parallel!
 
 include("solution/vfi.jl")
 export SolvedModel, value_function_iteration, solve_model
+export solve_model_multiscale, interpolate_value_function  # Multi-scale grid refinement
 export solution_diagnostics, print_solution_diagnostics
 export evaluate_value, evaluate_policy, compute_stationary_distribution
 export get_nthreads, get_threadid  # Threading utilities
