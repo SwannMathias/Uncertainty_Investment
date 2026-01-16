@@ -123,11 +123,12 @@ shocks = generate_shock_panel(
 print_shock_statistics(shocks)
 
 # Simulate firm panel
+# Note: T_years must be <= shocks.T / 2 (120 semesters / 2 = 60 years max)
 histories = simulate_firm_panel(
     sol_baseline,
     shocks;
     K_init = 1.,
-    T_years = 1000
+    T_years = 50
 )
 
 # Construct estimation panel
