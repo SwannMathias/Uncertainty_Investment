@@ -56,7 +56,6 @@ function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::In
     EV = compute_expectation(grids, V, i_D_half, i_sigma_half; horizon=:semester)
 
     # Objective function: maximize over Delta_I
-    # Note: We need to account for BOTH adjustment costs if using SeparateConvexCost
     function obj_Delta_I(Delta_I)
         K_double_prime = K_prime + Delta_I
 
@@ -69,8 +68,14 @@ function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::In
         end
 
         # Adjustment cost (mid-year component)
-        # For most cost types, we need total investment I + Delta_I
-        cost = compute_cost(ac, I_initial, Delta_I, K_current)
+        # For SeparateConvexCost, only charge the revision cost (phi_2) here,
+        # since the initial cost (phi_1) was already charged in the beginning-of-year problem
+        if ac isa SeparateConvexCost
+            cost = 0.5 * ac.phi_2 * (Delta_I / K_current)^2 * K_current
+        else
+            # For other cost types, compute the full cost
+            cost = compute_cost(ac, I_initial, Delta_I, K_current)
+        end
 
         # Interpolate expected value
         EV_interp = linear_interp_1d(grids.K_grid, EV, K_double_prime)
