@@ -70,7 +70,7 @@ end
 
 # Benchmark precomputed lookup
 t_lookup = @elapsed begin
-    sum_lookup = 0.0
+    local sum_lookup = 0.0
     for _ in 1:n_iterations
         i_K = rand(1:grids.n_K)
         i_D = rand(1:grids.n_D)
@@ -80,7 +80,7 @@ end
 
 # Benchmark function call
 t_function = @elapsed begin
-    sum_function = 0.0
+    local sum_function = 0.0
     for _ in 1:n_iterations
         i_K = rand(1:grids.n_K)
         i_D = rand(1:grids.n_D)
