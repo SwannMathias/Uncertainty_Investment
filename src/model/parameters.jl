@@ -147,14 +147,17 @@ function get_derived_parameters(p::ModelParameters)
     beta_semester = p.beta^(1/2)
 
     # Steady-state capital (deterministic case)
-    # From FOC: MPK = delta/beta => (1-gamma) * h * D_ss^gamma * K_ss^(-gamma) = delta/beta
+    # From FOC: MPK = delta/beta => h * D_ss^gamma * K_ss^(-gamma) = delta/beta
+    # Note: The (1-gamma) terms cancel when taking derivative of profit function:
+    #   pi(K,D) = (h/(1-gamma)) * D^gamma * K^(1-gamma)
+    #   dpi/dK = (h/(1-gamma)) * (1-gamma) * D^gamma * K^(-gamma) = h * D^gamma * K^(-gamma)
     # With D_ss = exp(mu_D), solve for K_ss
     D_ss = exp(p.demand.mu_D)
     user_cost = p.delta / p.beta
 
-    # MPK = (1 - gamma) * h * D^gamma * K^(-gamma)
-    # K_ss = [(1 - gamma) * h * D_ss^gamma / user_cost]^(1/gamma)
-    K_ss = ((1 - gamma) * h * D_ss^gamma / user_cost)^(1/gamma)
+    # MPK = h * D^gamma * K^(-gamma)
+    # K_ss = [h * D_ss^gamma / user_cost]^(1/gamma)
+    K_ss = (h * D_ss^gamma / user_cost)^(1/gamma)
 
     return DerivedParameters(gamma, h, delta_semester, beta_semester, K_ss)
 end
