@@ -331,17 +331,28 @@ function solution_diagnostics(sol::SolvedModel)
 
     # Investment rate (I/K) statistics
     I_rate = zeros(grids.n_K, grids.n_D, grids.n_sigma)
+    edge_min_count = 0
+    edge_max_count = 0
     for i_sigma in 1:grids.n_sigma
         for i_D in 1:grids.n_D
             for i_K in 1:grids.n_K
                 K = get_K(grids, i_K)
                 I_rate[i_K, i_D, i_sigma] = sol.I_policy[i_K, i_D, i_sigma] / K
+                if i_K == 1
+                    edge_min_count += 1
+                elseif i_K == grids.n_K
+                    edge_max_count += 1
+                end
             end
         end
     end
 
     I_rate_mean = mean(I_rate)
     I_rate_std = std(I_rate)
+
+    total_states = grids.n_K * grids.n_D * grids.n_sigma
+    edge_min_share = edge_min_count / total_states
+    edge_max_share = edge_max_count / total_states
 
     # Inaction rate (for models with adjustment costs)
     inaction_freq = sum(abs.(sol.I_policy) .< 1e-6) / length(sol.I_policy)
@@ -362,7 +373,9 @@ function solution_diagnostics(sol::SolvedModel)
         I_rate_std = I_rate_std,
         I_rate_ss = I_rate_ss,
         inaction_frequency = inaction_freq,
-        depreciation_rate = derived.delta_semester
+        depreciation_rate = derived.delta_semester,
+        K_edge_min_share = edge_min_share,
+        K_edge_max_share = edge_max_share
     )
 end
 
@@ -391,6 +404,10 @@ function print_solution_diagnostics(diag::NamedTuple)
     println("  Std Dev: $(format_number(diag.I_rate_std, digits=4))")
     println("  At K_ss: $(format_number(diag.I_rate_ss, digits=4))")
     println("  Depreciation: $(format_number(diag.depreciation_rate, digits=4))")
+
+    println("\nCapital Grid Edges (current K):")
+    println("  At K_min: $(format_number(diag.K_edge_min_share * 100, digits=2))%")
+    println("  At K_max: $(format_number(diag.K_edge_max_share * 100, digits=2))%")
 
     if diag.inaction_frequency > 0.01
         println("\nAdjustment Costs:")
