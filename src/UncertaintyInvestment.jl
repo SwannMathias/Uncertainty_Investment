@@ -74,9 +74,10 @@ export rouwenhorst, tauchen, SVDiscretization
 export discretize_sv_process, stationary_distribution, verify_discretization
 
 include("model/grids.jl")
-export StateGrids, construct_grids
+export StateGrids, PrecomputedProfits, construct_grids, precompute_profits
 export get_K, get_D, get_sigma, get_log_D, get_log_sigma
 export get_joint_state_index, get_D_sigma_indices
+export get_profit, get_log_profit, get_profit_at_K, get_profit_vector  # Precomputed profit accessors
 export find_K_bracket, interpolate_value, interpolate_policy
 export compute_expectation, compute_conditional_expectation
 export print_grid_info
