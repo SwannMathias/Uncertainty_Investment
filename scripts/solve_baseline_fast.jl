@@ -140,8 +140,8 @@ K = 1.0
 D = 1.0
 sigma = 0.1
 
-V_val = evaluate_value(sol_ac, K, D, sigma)
-I_opt = evaluate_policy(sol_ac, K, D, sigma)
+V_val = evaluate_value(sol_baseline, K, D, sigma)
+I_opt = evaluate_policy(sol_baseline, K, D, sigma)
 
 println("At (K=$K, D=$D, sigma=$sigma):")
 println("  Value: $V_val")

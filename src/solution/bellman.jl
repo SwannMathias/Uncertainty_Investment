@@ -225,7 +225,7 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
 
         # For separate costs, only charge C_1(I, K)
         if ac isa SeparateConvexCost
-            cost = 0.5 * ac.phi₁ * (I / K)^2 * K
+            cost = 0.5 * ac.phi_1 * (I / K)^2 * K
         elseif ac isa NoAdjustmentCost
             cost = 0.0
         elseif ac isa ConvexAdjustmentCost
@@ -376,7 +376,7 @@ function howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3
 
                     # Initial cost
                     if ac isa SeparateConvexCost
-                        cost_I = 0.5 * ac.phi₁ * (I / K)^2 * K
+                        cost_I = 0.5 * ac.phi_1 * (I / K)^2 * K
                     else
                         cost_I = compute_cost(ac, I, 0.0, K)
                     end
@@ -507,7 +507,7 @@ function howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{
 
             # Initial cost
             if ac isa SeparateConvexCost
-                cost_I = 0.5 * ac.phi₁ * (I / K)^2 * K
+                cost_I = 0.5 * ac.phi_1 * (I / K)^2 * K
             else
                 cost_I = compute_cost(ac, I, 0.0, K)
             end
