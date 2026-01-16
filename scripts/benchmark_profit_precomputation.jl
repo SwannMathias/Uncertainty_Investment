@@ -15,13 +15,14 @@ Expected results:
 - VFI: Measurable improvement in total solve time
 """
 
+using Pkg
+project_root = dirname(@__DIR__)
+Pkg.activate(project_root)
+
+using UncertaintyInvestment
 using Printf
 using Random
 using Statistics
-
-# Add package to path
-push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
-using UncertaintyInvestment
 
 println("="^70)
 println("Profit Precomputation Benchmark")
