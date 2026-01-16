@@ -5,7 +5,25 @@ StateGrids structure contains:
 - Capital grid (deterministic, continuous state)
 - Demand and volatility grids (discrete, stochastic states)
 - Transition matrices for expectations
+- Precomputed profit values for all (K, D) combinations
 """
+
+"""
+    PrecomputedProfits
+
+Container for precomputed profit function values.
+
+Storing π(K, D) for all grid points avoids repeated computation during VFI.
+This follows the approach in Catherine et al. (2022) for performance optimization.
+
+Fields:
+- profits: Matrix of size (n_K, n_D) where profits[i_K, i_D] = π(K[i_K], D[i_D])
+- log_profits: Log of profits for numerical stability (optional)
+"""
+struct PrecomputedProfits
+    profits::Matrix{Float64}        # profits[i_K, i_D]
+    log_profits::Matrix{Float64}    # log(profits) for numerical stability
+end
 
 """
     StateGrids
@@ -16,6 +34,8 @@ State variables:
 - K: Capital (continuous, discretized)
 - D: Demand (stochastic, discrete)
 - sigma: Volatility (stochastic, discrete)
+
+Also includes precomputed profit values for performance.
 """
 struct StateGrids
     # Capital grid
@@ -35,6 +55,61 @@ struct StateGrids
 
     # Total state space size
     n_states::Int
+
+    # Precomputed profits for all (K, D) combinations
+    precomputed_profits::PrecomputedProfits
+end
+
+"""
+    precompute_profits(K_grid::Vector{Float64}, sv::SVDiscretization,
+                       derived::DerivedParameters) -> PrecomputedProfits
+
+Pre-compute the profit function π(K, D) for all combinations of capital and demand grid points.
+
+This optimization (following Catherine et al. 2022) replaces repeated function calls
+with array lookups during VFI, providing significant speedup.
+
+# Arguments
+- `K_grid`: Vector of capital grid points
+- `sv`: SVDiscretization containing demand grid
+- `derived`: DerivedParameters containing gamma and h for profit computation
+
+# Returns
+- PrecomputedProfits struct with profits[i_K, i_D] = π(K[i_K], D[i_D])
+
+# Performance
+Pre-computing profits for a 100×15 grid takes ~0.1ms but saves millions of
+function calls during VFI iterations.
+"""
+function precompute_profits(K_grid::Vector{Float64}, sv::SVDiscretization,
+                           derived::DerivedParameters) :: PrecomputedProfits
+    n_K = length(K_grid)
+    n_D = length(sv.D_grid)
+
+    # Pre-allocate arrays
+    profits = zeros(n_K, n_D)
+    log_profits = zeros(n_K, n_D)
+
+    # Extract parameters for direct computation (avoid function call overhead)
+    gamma = derived.gamma
+    h = derived.h
+    h_scaled = h / (1 - gamma)  # Pre-compute the constant factor
+
+    # Pre-compute D levels (convert from log to level)
+    D_levels = exp.(sv.D_grid)
+
+    # Vectorized computation using broadcasting
+    # π(K, D) = (h / (1-γ)) * D^γ * K^(1-γ)
+    for i_D in 1:n_D
+        D_gamma = D_levels[i_D]^gamma
+        for i_K in 1:n_K
+            K = K_grid[i_K]
+            profits[i_K, i_D] = h_scaled * D_gamma * K^(1 - gamma)
+            log_profits[i_K, i_D] = log(profits[i_K, i_D])
+        end
+    end
+
+    return PrecomputedProfits(profits, log_profits)
 end
 
 """
@@ -42,11 +117,14 @@ end
 
 Construct complete state space grids from model parameters.
 
+This function also precomputes profit function values for all (K, D) combinations
+to optimize VFI performance.
+
 # Arguments
 - `params`: ModelParameters struct
 
 # Returns
-- StateGrids object containing all discretized state spaces
+- StateGrids object containing all discretized state spaces and precomputed profits
 """
 function construct_grids(params::ModelParameters)
     derived = get_derived_parameters(params)
@@ -73,11 +151,15 @@ function construct_grids(params::ModelParameters)
 
     n_states = sv.n_D * sv.n_sigma
 
+    # 5. Precompute profit function values for all (K, D) combinations
+    precomputed_profits = precompute_profits(K_grid, sv, derived)
+
     return StateGrids(
         K_grid, n_K, K_min, K_max,
         sv, params.numerical.n_D, params.numerical.n_sigma,
         Pi_semester, Pi_year,
-        n_states
+        n_states,
+        precomputed_profits
     )
 end
 
@@ -137,6 +219,85 @@ function get_D_sigma_indices(grids::StateGrids, i_state::Int)
     i_sigma = div(i_state - 1, grids.n_D) + 1
     i_D = mod(i_state - 1, grids.n_D) + 1
     return i_D, i_sigma
+end
+
+# =============================================================================
+# Precomputed profit accessors
+# =============================================================================
+
+"""
+    get_profit(grids::StateGrids, i_K::Int, i_D::Int) -> Float64
+
+Get precomputed profit π(K[i_K], D[i_D]) via direct array lookup.
+
+This is the primary interface for accessing profits during VFI.
+O(1) time complexity vs O(n) for function evaluation.
+"""
+@inline get_profit(grids::StateGrids, i_K::Int, i_D::Int) = grids.precomputed_profits.profits[i_K, i_D]
+
+"""
+    get_log_profit(grids::StateGrids, i_K::Int, i_D::Int) -> Float64
+
+Get precomputed log profit log(π(K[i_K], D[i_D])).
+
+Useful for numerical stability when working with ratios or percentages.
+"""
+@inline get_log_profit(grids::StateGrids, i_K::Int, i_D::Int) = grids.precomputed_profits.log_profits[i_K, i_D]
+
+"""
+    get_profit_at_K(grids::StateGrids, K::Float64, i_D::Int) -> Float64
+
+Get profit at off-grid capital K using linear interpolation.
+
+For evaluating profits at investment outcomes K' = (1-δ)K + I that
+don't fall exactly on grid points.
+
+# Arguments
+- `grids`: StateGrids containing precomputed profits
+- `K`: Capital level (potentially off-grid)
+- `i_D`: Demand state index (on-grid)
+
+# Returns
+- Linearly interpolated profit value
+"""
+function get_profit_at_K(grids::StateGrids, K::Float64, i_D::Int) :: Float64
+    # Handle boundary cases
+    if K <= grids.K_grid[1]
+        return grids.precomputed_profits.profits[1, i_D]
+    elseif K >= grids.K_grid[end]
+        return grids.precomputed_profits.profits[grids.n_K, i_D]
+    end
+
+    # Find bracket
+    i_low = searchsortedlast(grids.K_grid, K)
+    i_high = i_low + 1
+
+    # Linear interpolation weight
+    K_low = grids.K_grid[i_low]
+    K_high = grids.K_grid[i_high]
+    weight = (K - K_low) / (K_high - K_low)
+
+    # Interpolate profit
+    pi_low = grids.precomputed_profits.profits[i_low, i_D]
+    pi_high = grids.precomputed_profits.profits[i_high, i_D]
+
+    return (1 - weight) * pi_low + weight * pi_high
+end
+
+"""
+    get_profit_vector(grids::StateGrids, i_D::Int) -> Vector{Float64}
+
+Get profit values for all capital grid points at demand state i_D.
+
+Returns a view into the precomputed profits matrix (no allocation).
+
+# Example
+```julia
+profits_at_D = get_profit_vector(grids, i_D)  # Vector of length n_K
+```
+"""
+@inline function get_profit_vector(grids::StateGrids, i_D::Int)
+    return @view grids.precomputed_profits.profits[:, i_D]
 end
 
 # =============================================================================

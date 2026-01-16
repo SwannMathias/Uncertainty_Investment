@@ -112,14 +112,13 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
     # Initialize value and policy functions
     if isnothing(V_init)
         V = zeros(grids.n_K, grids.n_D, grids.n_sigma)
-        # Better initial guess: static profit
+        # Better initial guess: static profit (using precomputed profits)
         for i_sigma in 1:grids.n_sigma
             for i_D in 1:grids.n_D
-                D = get_D(grids, i_D)
                 for i_K in 1:grids.n_K
-                    K = get_K(grids, i_K)
                     # Approximate value as discounted stream of current profit
-                    pi = profit(K, D, derived)
+                    # Use precomputed profit for efficiency
+                    pi = get_profit(grids, i_K, i_D)
                     V[i_K, i_D, i_sigma] = pi / (1 - params.beta)
                 end
             end

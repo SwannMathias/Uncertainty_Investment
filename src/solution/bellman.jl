@@ -9,11 +9,16 @@ Timeline within year t:
 Value functions:
 - V(K, D, sigma): Beginning-of-year value
 - W(K', D, sigma): Mid-year continuation value (after initial investment)
+
+Performance optimization:
+- Profit function values are precomputed for all (K, D) grid points
+- Uses get_profit(grids, i_K, i_D) for O(1) lookups instead of function calls
+- For off-grid K, uses get_profit_at_K(grids, K, i_D) with interpolation
 """
 
 """
     solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::Int,
-                          K_current::Float64, I_initial::Float64,
+                          i_K::Int, K_current::Float64, I_initial::Float64,
                           V::Array{Float64,3}, grids::StateGrids,
                           params::ModelParameters, ac::AbstractAdjustmentCost,
                           derived::DerivedParameters) -> (Float64, Float64)
@@ -23,7 +28,8 @@ Solve mid-year problem: choose Delta_I to maximize expected value.
 Given:
 - K_prime: Capital after initial investment I (before Delta_I)
 - (D_half, sigma_half): Mid-year realizations
-- K_current: Beginning-of-year capital
+- i_K: Capital grid index (for precomputed profit lookup)
+- K_current: Beginning-of-year capital value
 - I_initial: Initial investment chosen at beginning of year
 
 Choose Delta_I to maximize:
@@ -34,17 +40,17 @@ where K'' = K_prime + Delta_I.
 # Returns
 - Delta_I_opt: Optimal investment revision
 - value: Maximized value
+
+# Performance
+Uses precomputed profits via get_profit(grids, i_K, i_D_half) for O(1) lookup.
 """
 function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::Int,
-                               K_current::Float64, I_initial::Float64,
+                               i_K::Int, K_current::Float64, I_initial::Float64,
                                V::Array{Float64,3}, grids::StateGrids,
                                params::ModelParameters, ac::AbstractAdjustmentCost,
                                derived::DerivedParameters)
-    # Get mid-year demand level
-    D_half = get_D(grids, i_D_half)
-
-    # Mid-year profit (operating on current capital)
-    pi_half = profit(K_current, D_half, derived)
+    # Mid-year profit (operating on current capital) - use precomputed value
+    pi_half = get_profit(grids, i_K, i_D_half)
 
     # Expected value over next year's states
     EV = compute_expectation(grids, V, i_D_half, i_sigma_half; horizon=:semester)
@@ -127,7 +133,7 @@ end
 
 """
     compute_midyear_continuation(K_prime::Float64, i_D::Int, i_sigma::Int,
-                                  K_current::Float64, I_initial::Float64,
+                                  i_K::Int, K_current::Float64, I_initial::Float64,
                                   V::Array{Float64,3}, grids::StateGrids,
                                   params::ModelParameters, ac::AbstractAdjustmentCost,
                                   derived::DerivedParameters) -> Float64
@@ -136,11 +142,14 @@ Compute W(K', D, sigma): expected value of mid-year problem.
 
 W(K', D, sigma) = E_{D_half, sigma_half | D, sigma}[max_Delta_I {...}]
 
+# Arguments
+- i_K: Capital grid index for precomputed profit lookup
+
 # Returns
 - Expected mid-year continuation value
 """
 function compute_midyear_continuation(K_prime::Float64, i_D::Int, i_sigma::Int,
-                                      K_current::Float64, I_initial::Float64,
+                                      i_K::Int, K_current::Float64, I_initial::Float64,
                                       V::Array{Float64,3}, grids::StateGrids,
                                       params::ModelParameters, ac::AbstractAdjustmentCost,
                                       derived::DerivedParameters)
@@ -153,9 +162,9 @@ function compute_midyear_continuation(K_prime::Float64, i_D::Int, i_sigma::Int,
     for i_state_half in 1:grids.n_states
         i_D_half, i_sigma_half = get_D_sigma_indices(grids, i_state_half)
 
-        # Solve mid-year problem for this realization
+        # Solve mid-year problem for this realization (using precomputed profits)
         Delta_I_opt, value_half = solve_midyear_problem(
-            K_prime, i_D_half, i_sigma_half, K_current, I_initial,
+            K_prime, i_D_half, i_sigma_half, i_K, K_current, I_initial,
             V, grids, params, ac, derived
         )
 
@@ -182,6 +191,9 @@ where K' = (1-delta)K + I.
 # Returns
 - I_opt: Optimal initial investment
 - V_value: Maximized value
+
+# Performance
+Uses precomputed profits via get_profit(grids, i_K, i_D) for O(1) lookup.
 """
 function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
                                       V::Array{Float64,3}, grids::StateGrids,
@@ -189,10 +201,9 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
                                       derived::DerivedParameters)
     # Current state
     K = get_K(grids, i_K)
-    D = get_D(grids, i_D)
 
-    # First-semester profit
-    pi_first = profit(K, D, derived)
+    # First-semester profit - use precomputed value
+    pi_first = get_profit(grids, i_K, i_D)
 
     # Objective function: maximize over I
     function obj_I(I)
@@ -226,9 +237,9 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
             cost = compute_cost(ac, I, 0.0, K)
         end
 
-        # Continuation value
+        # Continuation value (pass i_K for precomputed profit access)
         W_value = compute_midyear_continuation(
-            K_prime, i_D, i_sigma, K, I, V, grids, params, ac, derived
+            K_prime, i_D, i_sigma, i_K, K, I, V, grids, params, ac, derived
         )
 
         return -cost + W_value
@@ -353,13 +364,12 @@ function howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3
             for i_D in 1:grids.n_D
                 for i_K in 1:grids.n_K
                     K = get_K(grids, i_K)
-                    D = get_D(grids, i_D)
 
                     # Fixed policy
                     I = I_policy[i_K, i_D, i_sigma]
 
-                    # First-semester profit
-                    pi_first = profit(K, D, derived)
+                    # First-semester profit - use precomputed value
+                    pi_first = get_profit(grids, i_K, i_D)
 
                     # Capital after initial investment
                     K_prime = (1 - derived.delta_semester) * K + I
@@ -371,9 +381,9 @@ function howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3
                         cost_I = compute_cost(ac, I, 0.0, K)
                     end
 
-                    # Mid-year continuation (using current V)
+                    # Mid-year continuation (using current V, pass i_K for precomputed profits)
                     W_val = compute_midyear_continuation(
-                        K_prime, i_D, i_sigma, K, I, V_temp, grids, params, ac, derived
+                        K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac, derived
                     )
 
                     # Update value
@@ -485,13 +495,12 @@ function howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{
             i_sigma = (temp ÷ n_D) + 1
 
             K = get_K(grids, i_K)
-            D = get_D(grids, i_D)
 
             # Fixed policy
             I = I_policy[i_K, i_D, i_sigma]
 
-            # First-semester profit
-            pi_first = profit(K, D, derived)
+            # First-semester profit - use precomputed value
+            pi_first = get_profit(grids, i_K, i_D)
 
             # Capital after initial investment
             K_prime = (1 - derived.delta_semester) * K + I
@@ -503,9 +512,9 @@ function howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{
                 cost_I = compute_cost(ac, I, 0.0, K)
             end
 
-            # Mid-year continuation (using V_temp which is read-only this step)
+            # Mid-year continuation (using V_temp which is read-only this step, pass i_K for precomputed profits)
             W_val = compute_midyear_continuation(
-                K_prime, i_D, i_sigma, K, I, V_temp, grids, params, ac, derived
+                K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac, derived
             )
 
             # Update value (no race condition)
