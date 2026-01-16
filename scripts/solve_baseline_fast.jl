@@ -67,7 +67,7 @@ params = ModelParameters(
         n_D = 5,               # Demand states (was 15)
         n_sigma = 3,           # Volatility states (was 7)
         K_min_factor = 0.1,
-        K_max_factor = 3.0,
+        K_max_factor = 10^6,
         tol_vfi = 1e-4,        # Relaxed tolerance (was 1e-6)
         max_iter = 200,        # Fewer iterations (was 1000)
         howard_steps = 5       # Fewer acceleration steps (was 10)
@@ -90,11 +90,13 @@ println("="^70)
 
 println("\n2. Solving baseline model (no adjustment costs)...")
 
-sol_baseline = solve_model(params; ac=NoAdjustmentCost(), verbose=true)
+sol_baseline = solve_model(params; ac=SeparateConvexCost(), verbose=true)
+
 
 # Save solution
 mkpath("output/solutions_fast")
 save_solution("output/solutions_fast/baseline_fast.jld2", sol_baseline)
+export_to_csv(sol_baseline, "output/solutions/with_ac/")
 
 println("\n✓ Fast test complete!")
 println("\nResults saved in:")
@@ -124,8 +126,8 @@ print_shock_statistics(shocks)
 histories = simulate_firm_panel(
     sol_baseline,
     shocks;
-    K_init = 1.0,
-    T_years = 50
+    K_init = 1.,
+    T_years = 1000
 )
 
 # Construct estimation panel

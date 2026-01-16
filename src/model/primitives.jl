@@ -29,7 +29,7 @@ function profit(K::Float64, D::Float64, derived::DerivedParameters)
     gamma = derived.gamma
     h = derived.h
 
-    return (h / (1 - gamma)) * D^gamma * K^(1 - gamma)
+    return 1000*(h / (1 - gamma)) * D^gamma * K^(1 - gamma)
 end
 
 """
