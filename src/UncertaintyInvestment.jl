@@ -96,6 +96,8 @@ export solve_midyear_problem, compute_midyear_continuation
 export solve_beginning_year_problem, bellman_operator!
 export bellman_operator_no_ac!, howard_improvement_step!
 export bellman_operator_parallel!, howard_improvement_step_parallel!
+export solve_annual_problem, bellman_operator_annual!, bellman_operator_annual_parallel!
+export howard_improvement_step_annual!, howard_improvement_step_annual_parallel!
 
 include("solution/vfi.jl")
 export SolvedModel, value_function_iteration, solve_model

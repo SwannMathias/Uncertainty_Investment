@@ -31,9 +31,14 @@ Process: x' = mu(1-rho) + rho*x + sigma*epsilon, epsilon ~ N(0,1)
 Kopecky & Suen (2010), "Finite State Markov-Chain Approximations to Highly Persistent Processes"
 """
 function rouwenhorst(n::Int, rho::Float64, sigma::Float64; mu::Float64=0.0)
-    @assert n >= 2 "Need at least 2 grid points"
+    @assert n >= 1 "Need at least 1 grid point"
     @assert 0.0 <= rho < 1.0 "rho must be in [0, 1)"
     @assert sigma > 0.0 "sigma must be positive"
+
+    # Special case: n=1 → deterministic process at its mean
+    if n == 1
+        return [mu], reshape([1.0], 1, 1)
+    end
 
     # Step 1: Compute unconditional variance
     sigma_x = sigma / sqrt(1 - rho^2)
@@ -100,10 +105,15 @@ Process: x' = mu(1-rho) + rho*x + sigma*epsilon, epsilon ~ N(0,1)
 Tauchen (1986), "Finite State Markov-Chain Approximations to Univariate and Vector Autoregressions"
 """
 function tauchen(n::Int, rho::Float64, sigma::Float64; mu::Float64=0.0, n_std::Float64=3.0)
-    @assert n >= 2 "Need at least 2 grid points"
+    @assert n >= 1 "Need at least 1 grid point"
     @assert 0.0 <= rho < 1.0 "rho must be in [0, 1)"
     @assert sigma > 0.0 "sigma must be positive"
     @assert n_std > 0.0 "n_std must be positive"
+
+    # Special case: n=1 → deterministic process at its mean
+    if n == 1
+        return [mu], reshape([1.0], 1, 1)
+    end
 
     # Unconditional variance
     sigma_x = sigma / sqrt(1 - rho^2)
@@ -184,7 +194,11 @@ function discretize_sv_process(demand::DemandProcess, vol::VolatilityProcess,
     @assert method in [:rouwenhorst, :tauchen] "Method must be :rouwenhorst or :tauchen"
 
     # 1. Discretize volatility process (independent)
-    if method == :rouwenhorst
+    if n_sigma == 1
+        # Deterministic volatility: single state at long-run mean
+        sigma_grid = [vol.sigma_bar]
+        Pi_sigma = reshape([1.0], 1, 1)
+    elseif method == :rouwenhorst
         sigma_grid, Pi_sigma = rouwenhorst(n_sigma, vol.rho_sigma, vol.sigma_eta; mu=vol.sigma_bar)
     else
         sigma_grid, Pi_sigma = tauchen(n_sigma, vol.rho_sigma, vol.sigma_eta; mu=vol.sigma_bar)
@@ -195,18 +209,24 @@ function discretize_sv_process(demand::DemandProcess, vol::VolatilityProcess,
     D_grids = Vector{Vector{Float64}}(undef, n_sigma)
 
     for i_sigma in 1:n_sigma
-        # Volatility level (in levels, not logs)
-        sigma_level = exp(sigma_grid[i_sigma])
-
-        # Discretize demand with this volatility
-        if method == :rouwenhorst
-            D_grid_temp, Pi_D_temp = rouwenhorst(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
+        if n_D == 1
+            # Deterministic demand: single state at long-run mean
+            D_grids[i_sigma] = [demand.mu_D]
+            Pi_D_given_sigma[:, :, i_sigma] = reshape([1.0], 1, 1)
         else
-            D_grid_temp, Pi_D_temp = tauchen(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
-        end
+            # Volatility level (in levels, not logs)
+            sigma_level = exp(sigma_grid[i_sigma])
 
-        D_grids[i_sigma] = D_grid_temp
-        Pi_D_given_sigma[:, :, i_sigma] = Pi_D_temp
+            # Discretize demand with this volatility
+            if method == :rouwenhorst
+                D_grid_temp, Pi_D_temp = rouwenhorst(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
+            else
+                D_grid_temp, Pi_D_temp = tauchen(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
+            end
+
+            D_grids[i_sigma] = D_grid_temp
+            Pi_D_given_sigma[:, :, i_sigma] = Pi_D_temp
+        end
     end
 
     # 3. Use average demand grid (they should be similar for persistent processes)

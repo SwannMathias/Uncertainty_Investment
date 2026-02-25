@@ -404,6 +404,246 @@ function howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3
 end
 
 # ============================================================================
+# Annual Bellman Operators (no half-period)
+# ============================================================================
+
+"""
+    solve_annual_problem(i_K::Int, i_D::Int, i_sigma::Int,
+                         V::Array{Float64,3}, grids::StateGrids,
+                         params::ModelParameters, ac::AbstractAdjustmentCost,
+                         derived::DerivedParameters) -> (Float64, Float64)
+
+Solve the annual investment problem (no mid-year revision):
+
+V(K, D, σ) = max_I { π(K,D) - C(I,K) + β E[V(K', D', σ') | D, σ] }
+K' = (1-δ)K + I
+
+Uses annual discount factor β and depreciation δ (not semester rates).
+Uses Pi_year for expectations.
+
+# Returns
+- I_opt: Optimal investment
+- V_value: Maximized value
+"""
+function solve_annual_problem(i_K::Int, i_D::Int, i_sigma::Int,
+                              V::Array{Float64,3}, grids::StateGrids,
+                              params::ModelParameters, ac::AbstractAdjustmentCost,
+                              derived::DerivedParameters)
+    K = get_K(grids, i_K)
+    pi_current = get_profit(grids, i_K, i_D)
+
+    # Annual rates (not semester)
+    delta = params.delta
+    beta = params.beta
+
+    # Expected continuation using annual transition matrix
+    EV = compute_expectation(grids, V, i_D, i_sigma; horizon=:year)
+
+    # Objective function: maximize over I
+    function obj_I(I)
+        K_prime = (1 - delta) * K + I
+
+        if K_prime < grids.K_min
+            return -Inf
+        end
+        if K_prime > grids.K_max
+            return -1e10
+        end
+
+        # Total adjustment cost (single decision, no Delta_I)
+        cost = compute_cost(ac, I, 0.0, K)
+
+        # Interpolate expected value at K'
+        EV_interp = linear_interp_1d(grids.K_grid, EV, K_prime)
+
+        return -cost + beta * EV_interp
+    end
+
+    # Search bounds: K_min <= (1-delta)*K + I <= K_max
+    I_min = grids.K_min - (1 - delta) * K
+    I_max = grids.K_max - (1 - delta) * K
+    # Ensure K_prime > 0
+    I_min = max(I_min, -(1 - delta) * K + 1e-6)
+
+    if has_fixed_cost(ac)
+        # Discrete choice: invest or not
+        val_no_invest = obj_I(0.0)
+
+        if I_min < -1e-10 || I_max > 1e-10
+            I_opt_invest, val_invest = maximize_univariate(obj_I, I_min, I_max; tol=1e-6)
+
+            if val_invest > val_no_invest
+                return I_opt_invest, pi_current + val_invest
+            else
+                return 0.0, pi_current + val_no_invest
+            end
+        else
+            return 0.0, pi_current + val_no_invest
+        end
+    elseif ac isa NoAdjustmentCost
+        # No cost: maximize EV directly via grid search then refine
+        I_opt, val = maximize_univariate(obj_I, I_min, I_max; method=:brent, tol=1e-5)
+        return I_opt, pi_current + val
+    else
+        I_opt, val = maximize_univariate(obj_I, I_min, I_max; tol=1e-6)
+        return I_opt, pi_current + val
+    end
+end
+
+"""
+    bellman_operator_annual!(V_new::Array{Float64,3}, V::Array{Float64,3},
+                             I_policy::Array{Float64,3}, grids::StateGrids,
+                             params::ModelParameters, ac::AbstractAdjustmentCost,
+                             derived::DerivedParameters) -> Nothing
+
+Apply annual Bellman operator (no mid-year revision): V_new = T(V).
+
+Uses annual β and δ, and Pi_year for expectations.
+"""
+function bellman_operator_annual!(V_new::Array{Float64,3}, V::Array{Float64,3},
+                                  I_policy::Array{Float64,3}, grids::StateGrids,
+                                  params::ModelParameters, ac::AbstractAdjustmentCost,
+                                  derived::DerivedParameters)
+    for i_sigma in 1:grids.n_sigma
+        for i_D in 1:grids.n_D
+            for i_K in 1:grids.n_K
+                I_opt, V_value = solve_annual_problem(
+                    i_K, i_D, i_sigma, V, grids, params, ac, derived
+                )
+                V_new[i_K, i_D, i_sigma] = V_value
+                I_policy[i_K, i_D, i_sigma] = I_opt
+            end
+        end
+    end
+
+    return nothing
+end
+
+"""
+    bellman_operator_annual_parallel!(V_new::Array{Float64,3}, V::Array{Float64,3},
+                                      I_policy::Array{Float64,3}, grids::StateGrids,
+                                      params::ModelParameters, ac::AbstractAdjustmentCost,
+                                      derived::DerivedParameters) -> Nothing
+
+Parallel version of the annual Bellman operator using multi-threading.
+"""
+function bellman_operator_annual_parallel!(V_new::Array{Float64,3}, V::Array{Float64,3},
+                                           I_policy::Array{Float64,3}, grids::StateGrids,
+                                           params::ModelParameters, ac::AbstractAdjustmentCost,
+                                           derived::DerivedParameters)
+    n_K = grids.n_K
+    n_D = grids.n_D
+    n_sigma = grids.n_sigma
+    n_total = n_K * n_D * n_sigma
+
+    @threads for idx in 1:n_total
+        i_K = ((idx - 1) % n_K) + 1
+        temp = (idx - 1) ÷ n_K
+        i_D = (temp % n_D) + 1
+        i_sigma = (temp ÷ n_D) + 1
+
+        I_opt, V_value = solve_annual_problem(
+            i_K, i_D, i_sigma, V, grids, params, ac, derived
+        )
+
+        V_new[i_K, i_D, i_sigma] = V_value
+        I_policy[i_K, i_D, i_sigma] = I_opt
+    end
+
+    return nothing
+end
+
+"""
+    howard_improvement_step_annual!(V::Array{Float64,3}, I_policy::Array{Float64,3},
+                                    grids::StateGrids, params::ModelParameters,
+                                    ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                                    n_steps::Int) -> Nothing
+
+Howard improvement steps for the annual model (no mid-year revision).
+
+Uses annual β and δ, and Pi_year for expectations.
+"""
+function howard_improvement_step_annual!(V::Array{Float64,3}, I_policy::Array{Float64,3},
+                                         grids::StateGrids, params::ModelParameters,
+                                         ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                                         n_steps::Int)
+    delta = params.delta
+    beta = params.beta
+    V_temp = copy(V)
+
+    for step in 1:n_steps
+        for i_sigma in 1:grids.n_sigma
+            for i_D in 1:grids.n_D
+                for i_K in 1:grids.n_K
+                    K = get_K(grids, i_K)
+                    I = I_policy[i_K, i_D, i_sigma]
+
+                    pi_current = get_profit(grids, i_K, i_D)
+                    cost = compute_cost(ac, I, 0.0, K)
+
+                    K_prime = (1 - delta) * K + I
+                    EV = compute_expectation(grids, V_temp, i_D, i_sigma; horizon=:year)
+                    EV_interp = linear_interp_1d(grids.K_grid, EV, K_prime)
+
+                    V[i_K, i_D, i_sigma] = pi_current - cost + beta * EV_interp
+                end
+            end
+        end
+
+        V_temp .= V
+    end
+
+    return nothing
+end
+
+"""
+    howard_improvement_step_annual_parallel!(V::Array{Float64,3}, I_policy::Array{Float64,3},
+                                             grids::StateGrids, params::ModelParameters,
+                                             ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                                             n_steps::Int) -> Nothing
+
+Parallel Howard improvement steps for the annual model.
+"""
+function howard_improvement_step_annual_parallel!(V::Array{Float64,3}, I_policy::Array{Float64,3},
+                                                   grids::StateGrids, params::ModelParameters,
+                                                   ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                                                   n_steps::Int)
+    n_K = grids.n_K
+    n_D = grids.n_D
+    n_sigma = grids.n_sigma
+    n_total = n_K * n_D * n_sigma
+
+    delta = params.delta
+    beta = params.beta
+    V_temp = copy(V)
+
+    for step in 1:n_steps
+        @threads for idx in 1:n_total
+            i_K = ((idx - 1) % n_K) + 1
+            temp = (idx - 1) ÷ n_K
+            i_D = (temp % n_D) + 1
+            i_sigma = (temp ÷ n_D) + 1
+
+            K = get_K(grids, i_K)
+            I = I_policy[i_K, i_D, i_sigma]
+
+            pi_current = get_profit(grids, i_K, i_D)
+            cost = compute_cost(ac, I, 0.0, K)
+
+            K_prime = (1 - delta) * K + I
+            EV = compute_expectation(grids, V_temp, i_D, i_sigma; horizon=:year)
+            EV_interp = linear_interp_1d(grids.K_grid, EV, K_prime)
+
+            V[i_K, i_D, i_sigma] = pi_current - cost + beta * EV_interp
+        end
+
+        V_temp .= V
+    end
+
+    return nothing
+end
+
+# ============================================================================
 # Parallelized Bellman Operators
 # ============================================================================
 
