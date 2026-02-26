@@ -153,7 +153,7 @@ function get_derived_parameters(p::ModelParameters)
     #   dpi/dK = (h/(1-gamma)) * (1-gamma) * D^gamma * K^(-gamma) = h * D^gamma * K^(-gamma)
     # With D_ss = exp(mu_D), solve for K_ss
     D_ss = exp(p.demand.mu_D)
-    user_cost = p.delta / p.beta
+    user_cost = p.delta  + (1/p.beta-1)  # r = (1/beta - 1)
 
     # MPK = h * D^gamma * K^(-gamma)
     # K_ss = [h * D_ss^gamma / user_cost]^(1/gamma)

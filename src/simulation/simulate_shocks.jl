@@ -213,7 +213,7 @@ function generate_shock_panel(demand::DemandProcess, vol::VolatilityProcess,
     end
 
     # Convert to levels
-    D_level = exp.(D_log)
+    D_level = exp.(D_log) # Add 
     sigma_level = exp.(sigma_log)
 
     return ShockPanel(n_firms, T, D_log, sigma_log, D_level, sigma_level)
