@@ -56,126 +56,93 @@ Simulate single firm given shock paths.
 """
 function simulate_firm(sol::SolvedModel, D_path::Vector{Float64}, sigma_path::Vector{Float64},
                       K_init::Float64; T_years::Int)
+    @assert length(D_path) >= 2 * T_years "Need at least 2*T_years semesters"
+    @assert length(sigma_path) >= 2 * T_years "Need at least 2*T_years semesters"
+
     derived = get_derived_parameters(sol.params)
     grids = sol.grids
 
-    if sol.use_half_period
-        # --- Nested half-period simulation ---
-        @assert length(D_path) >= 2 * T_years "Need at least 2*T_years semesters"
-        @assert length(sigma_path) >= 2 * T_years "Need at least 2*T_years semesters"
+    # Allocate storage
+    K = zeros(T_years + 1)
+    D_first = zeros(T_years)
+    D_second = zeros(T_years)
+    sigma_first = zeros(T_years)
+    sigma_second = zeros(T_years)
+    I_initial = zeros(T_years)
+    Delta_I = zeros(T_years)
+    I_tot = zeros(T_years)
+    profits = zeros(T_years)
 
-        # Allocate storage
-        K = zeros(T_years + 1)
-        D_first = zeros(T_years)
-        D_second = zeros(T_years)
-        sigma_first = zeros(T_years)
-        sigma_second = zeros(T_years)
-        I_initial = zeros(T_years)
-        Delta_I = zeros(T_years)
-        I_tot = zeros(T_years)
-        profits = zeros(T_years)
+    # Initial capital
+    K[1] = K_init
 
-        K[1] = K_init
+    # Simulate year by year
+    for year in 1:T_years
+        # Semester indices
+        sem1 = 2 * (year - 1) + 1
+        sem2 = 2 * year
 
-        for year in 1:T_years
-            sem1 = 2 * (year - 1) + 1
-            sem2 = 2 * year
+        # Current state
+        K_current = K[year]
+        log_D = D_path[sem1]
+        log_sigma = sigma_path[sem1]
+        D_level = exp(log_D)
+        sigma_level = exp(log_sigma)
 
-            K_current = K[year]
-            log_D = D_path[sem1]
-            log_sigma = sigma_path[sem1]
-            D_level = exp(log_D)
-            sigma_level = exp(log_sigma)
+        # Store first semester states
+        D_first[year] = D_level
+        sigma_first[year] = sigma_level
 
-            D_first[year] = D_level
-            sigma_first[year] = sigma_level
+        # Find nearest grid points for (D, sigma)
+        i_D = argmin(abs.(grids.sv.D_grid .- log_D))
+        i_sigma = argmin(abs.(grids.sv.sigma_grid .- log_sigma))
 
-            i_D = argmin(abs.(grids.sv.D_grid .- log_D))
-            i_sigma = argmin(abs.(grids.sv.sigma_grid .- log_sigma))
+        # Interpolate policy function for initial investment
+        I = interpolate_policy(grids, sol.I_policy, K_current, i_D, i_sigma)
+        I_initial[year] = I
 
-            I = interpolate_policy(grids, sol.I_policy, K_current, i_D, i_sigma)
-            I_initial[year] = I
+        # Capital after initial investment (before revision)
+        K_prime = (1 - derived.delta_semester) * K_current + I
 
-            K_prime = (1 - derived.delta_semester) * K_current + I
+        # Mid-year shocks
+        log_D_half = D_path[sem2]
+        log_sigma_half = sigma_path[sem2]
+        D_half_level = exp(log_D_half)
+        sigma_half_level = exp(log_sigma_half)
 
-            log_D_half = D_path[sem2]
-            log_sigma_half = sigma_path[sem2]
-            D_half_level = exp(log_D_half)
-            sigma_half_level = exp(log_sigma_half)
+        # Store second semester states
+        D_second[year] = D_half_level
+        sigma_second[year] = sigma_half_level
 
-            D_second[year] = D_half_level
-            sigma_second[year] = sigma_half_level
+        # Find nearest grid points for mid-year states
+        i_D_half = argmin(abs.(grids.sv.D_grid .- log_D_half))
+        i_sigma_half = argmin(abs.(grids.sv.sigma_grid .- log_sigma_half))
 
-            i_D_half = argmin(abs.(grids.sv.D_grid .- log_D_half))
-            i_sigma_half = argmin(abs.(grids.sv.sigma_grid .- log_sigma_half))
+        # Find nearest K grid index for precomputed profit lookup
+        i_K = argmin(abs.(grids.K_grid .- K_current))
 
-            i_K = argmin(abs.(grids.K_grid .- K_current))
+        # Solve mid-year problem for investment revision
+        # This requires solving the optimization problem
+        Delta_I_opt, _ = solve_midyear_problem(
+            K_prime, i_D_half, i_sigma_half, i_K, K_current, I,
+            sol.V, grids, sol.params, sol.ac, derived
+        )
+        Delta_I[year] = Delta_I_opt
 
-            Delta_I_opt, _ = solve_midyear_problem(
-                K_prime, i_D_half, i_sigma_half, i_K, K_current, I,
-                sol.V, grids, sol.params, sol.ac, derived
-            )
-            Delta_I[year] = Delta_I_opt
+        # Total investment
+        I_tot[year] = I + Delta_I_opt
 
-            I_tot[year] = I + Delta_I_opt
-            K[year + 1] = K_prime + Delta_I_opt
+        # Next period capital
+        K[year + 1] = K_prime + Delta_I_opt
 
-            pi1 = profit(K_current, D_level, derived)
-            pi2 = profit(K_current, D_half_level, derived)
-            profits[year] = pi1 + pi2
-        end
-
-        return FirmHistory(T_years, K[1:end-1], D_first, D_second, sigma_first, sigma_second,
-                          I_initial, Delta_I, I_tot, profits)
-    else
-        # --- Annual simulation (no half-period) ---
-        @assert length(D_path) >= T_years "Need at least T_years periods"
-        @assert length(sigma_path) >= T_years "Need at least T_years periods"
-
-        delta = sol.params.delta
-
-        # Allocate storage
-        K = zeros(T_years + 1)
-        D_first = zeros(T_years)
-        D_second = zeros(T_years)    # filled with same as D_first (no mid-year)
-        sigma_first = zeros(T_years)
-        sigma_second = zeros(T_years)
-        I_initial = zeros(T_years)
-        Delta_I_arr = zeros(T_years) # always zero
-        I_tot = zeros(T_years)
-        profits = zeros(T_years)
-
-        K[1] = K_init
-
-        for year in 1:T_years
-            K_current = K[year]
-            log_D = D_path[year]
-            log_sigma = sigma_path[year]
-            D_level = exp(log_D)
-            sigma_level = exp(log_sigma)
-
-            D_first[year] = D_level
-            D_second[year] = D_level
-            sigma_first[year] = sigma_level
-            sigma_second[year] = sigma_level
-
-            i_D = argmin(abs.(grids.sv.D_grid .- log_D))
-            i_sigma = argmin(abs.(grids.sv.sigma_grid .- log_sigma))
-
-            I = interpolate_policy(grids, sol.I_policy, K_current, i_D, i_sigma)
-            I_initial[year] = I
-            I_tot[year] = I
-
-            # No Delta_I in annual mode
-            K[year + 1] = (1 - delta) * K_current + I
-
-            # Single annual profit
-            profits[year] = profit(K_current, D_level, derived)
-        end
-
-        return FirmHistory(T_years, K[1:end-1], D_first, D_second, sigma_first, sigma_second,
-                          I_initial, Delta_I_arr, I_tot, profits)
+        # Annual profit
+        pi1 = profit(K_current, D_level, derived)
+        pi2 = profit(K_current, D_half_level, derived)
+        profits[year] = pi1 + pi2
     end
+
+    return FirmHistory(T_years, K[1:end-1], D_first, D_second, sigma_first, sigma_second,
+                      I_initial, Delta_I, I_tot, profits)
 end
 
 """

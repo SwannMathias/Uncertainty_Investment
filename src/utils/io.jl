@@ -30,8 +30,7 @@ function save_solution(filename::String, sol::SolvedModel)
             V = sol.V,
             I_policy = sol.I_policy,
             Delta_I_policy = sol.Delta_I_policy,
-            convergence = sol.convergence,
-            use_half_period = sol.use_half_period)
+            convergence = sol.convergence)
 
     println("Solution saved to: $filename")
 end
@@ -53,9 +52,6 @@ function load_solution(filename::String)
     # Load from JLD2
     data = load(filename)
 
-    # Handle files saved before use_half_period was added (default to true)
-    use_half_period = haskey(data, "use_half_period") ? data["use_half_period"] : true
-
     return SolvedModel(
         data["params"],
         data["grids"],
@@ -63,8 +59,7 @@ function load_solution(filename::String)
         data["V"],
         data["I_policy"],
         data["Delta_I_policy"],
-        data["convergence"],
-        use_half_period
+        data["convergence"]
     )
 end
 
