@@ -210,8 +210,8 @@ using Statistics
         I_policy_parallel = zeros(grids.n_K, grids.n_D, grids.n_sigma)
 
         # Apply both operators
-        bellman_operator!(V_new_serial, V, I_policy_serial, grids, params, ac, derived)
-        bellman_operator_parallel!(V_new_parallel, V, I_policy_parallel, grids, params, ac, derived)
+        bellman_operator!(V_new_serial, V, I_policy_serial, grids, params, ac, ac, derived)
+        bellman_operator_parallel!(V_new_parallel, V, I_policy_parallel, grids, params, ac, ac, derived)
 
         # Check equality
         V_diff = maximum(abs.(V_new_serial .- V_new_parallel))

@@ -62,8 +62,8 @@ export profit_elasticity_K, profit_elasticity_D, check_profit_properties
 
 include("model/adjustment_costs.jl")
 export AbstractAdjustmentCost
-export NoAdjustmentCost, ConvexAdjustmentCost, SeparateConvexCost
-export FixedAdjustmentCost, AsymmetricAdjustmentCost, PartialIrreversibility
+export NoAdjustmentCost, ConvexAdjustmentCost
+export FixedAdjustmentCost
 export CompositeAdjustmentCost
 export compute_cost, marginal_cost_I, marginal_cost_Delta_I
 export has_fixed_cost, is_differentiable, describe_adjustment_cost
@@ -94,7 +94,7 @@ export derivative_fd, derivative_cd, gradient_fd
 include("solution/bellman.jl")
 export solve_midyear_problem, compute_midyear_continuation
 export solve_beginning_year_problem, bellman_operator!
-export bellman_operator_no_ac!, howard_improvement_step!
+export howard_improvement_step!
 export bellman_operator_parallel!, howard_improvement_step_parallel!
 
 include("solution/vfi.jl")

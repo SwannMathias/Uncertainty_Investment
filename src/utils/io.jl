@@ -26,7 +26,8 @@ function save_solution(filename::String, sol::SolvedModel)
     jldsave(filename;
             params = sol.params,
             grids = sol.grids,
-            ac = sol.ac,
+            ac_begin = sol.ac_begin,
+            ac_mid_year = sol.ac_mid_year,
             V = sol.V,
             I_policy = sol.I_policy,
             Delta_I_policy = sol.Delta_I_policy,
@@ -52,10 +53,20 @@ function load_solution(filename::String)
     # Load from JLD2
     data = load(filename)
 
+    # Handle old save files that have single "ac" key
+    if haskey(data, "ac_begin")
+        ac_begin = data["ac_begin"]
+        ac_mid_year = data["ac_mid_year"]
+    else
+        ac_begin = data["ac"]
+        ac_mid_year = data["ac"]
+    end
+
     return SolvedModel(
         data["params"],
         data["grids"],
-        data["ac"],
+        ac_begin,
+        ac_mid_year,
         data["V"],
         data["I_policy"],
         data["Delta_I_policy"],

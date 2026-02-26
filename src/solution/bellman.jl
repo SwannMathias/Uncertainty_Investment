@@ -20,7 +20,7 @@ Performance optimization:
     solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::Int,
                           i_K::Int, K_current::Float64, I_initial::Float64,
                           V::Array{Float64,3}, grids::StateGrids,
-                          params::ModelParameters, ac::AbstractAdjustmentCost,
+                          params::ModelParameters, ac_mid_year::AbstractAdjustmentCost,
                           derived::DerivedParameters) -> (Float64, Float64)
 
 Solve mid-year problem: choose Delta_I to maximize expected value.
@@ -47,7 +47,7 @@ Uses precomputed profits via get_profit(grids, i_K, i_D_half) for O(1) lookup.
 function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::Int,
                                i_K::Int, K_current::Float64, I_initial::Float64,
                                V::Array{Float64,3}, grids::StateGrids,
-                               params::ModelParameters, ac::AbstractAdjustmentCost,
+                               params::ModelParameters, ac_mid_year::AbstractAdjustmentCost,
                                derived::DerivedParameters)
     # Mid-year profit (operating on current capital) - use precomputed value
     pi_half = get_profit(grids, i_K, i_D_half)
@@ -67,15 +67,9 @@ function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::In
             return -1e10  # Penalty but not -Inf
         end
 
-        # Adjustment cost (mid-year component)
-        # For SeparateConvexCost, only charge the revision cost (phi_2) here,
-        # since the initial cost (phi_1) was already charged in the beginning-of-year problem
-        if ac isa SeparateConvexCost
-            cost = 0.5 * ac.phi_2 * (Delta_I / K_current)^2 * K_current
-        else
-            # For other cost types, compute the full cost
-            cost = compute_cost(ac, I_initial, Delta_I, K_current)
-        end
+        # Mid-year adjustment cost: cost on Delta_I only
+        # Pass (0.0, Delta_I) so cost functions see Delta_I as the sole decision
+        cost = compute_cost(ac_mid_year, 0.0, Delta_I, K_current)
 
         # Interpolate expected value
         EV_interp = linear_interp_1d(grids.K_grid, EV, K_double_prime)
@@ -93,7 +87,7 @@ function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::In
     Delta_I_min = max(Delta_I_min, -K_prime + 1e-6)
 
     # If no adjustment costs, analytical solution from FOC
-    if ac isa NoAdjustmentCost
+    if ac_mid_year isa NoAdjustmentCost
         # FOC: beta * ∂EV/∂K = 0 => Choose K'' to maximize EV
         # This is equivalent to choosing Delta_I to maximize EV(K'')
         # Use simple grid search
@@ -110,7 +104,7 @@ function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::In
     end
 
     # With adjustment costs, need to optimize
-    if has_fixed_cost(ac)
+    if has_fixed_cost(ac_mid_year)
         # Discrete choice: adjust or not
         # Option 1: No adjustment (Delta_I = 0)
         value_no_adjust = pi_half + obj_Delta_I(0.0)
@@ -140,7 +134,7 @@ end
     compute_midyear_continuation(K_prime::Float64, i_D::Int, i_sigma::Int,
                                   i_K::Int, K_current::Float64, I_initial::Float64,
                                   V::Array{Float64,3}, grids::StateGrids,
-                                  params::ModelParameters, ac::AbstractAdjustmentCost,
+                                  params::ModelParameters, ac_mid_year::AbstractAdjustmentCost,
                                   derived::DerivedParameters) -> Float64
 
 Compute W(K', D, sigma): expected value of mid-year problem.
@@ -156,7 +150,7 @@ W(K', D, sigma) = E_{D_half, sigma_half | D, sigma}[max_Delta_I {...}]
 function compute_midyear_continuation(K_prime::Float64, i_D::Int, i_sigma::Int,
                                       i_K::Int, K_current::Float64, I_initial::Float64,
                                       V::Array{Float64,3}, grids::StateGrids,
-                                      params::ModelParameters, ac::AbstractAdjustmentCost,
+                                      params::ModelParameters, ac_mid_year::AbstractAdjustmentCost,
                                       derived::DerivedParameters)
     # Get transition probability from (D, sigma) to (D_half, sigma_half)
     i_state = get_joint_state_index(grids, i_D, i_sigma)
@@ -170,7 +164,7 @@ function compute_midyear_continuation(K_prime::Float64, i_D::Int, i_sigma::Int,
         # Solve mid-year problem for this realization (using precomputed profits)
         Delta_I_opt, value_half = solve_midyear_problem(
             K_prime, i_D_half, i_sigma_half, i_K, K_current, I_initial,
-            V, grids, params, ac, derived
+            V, grids, params, ac_mid_year, derived
         )
 
         # Weight by probability
@@ -184,7 +178,9 @@ end
 """
     solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
                                   V::Array{Float64,3}, grids::StateGrids,
-                                  params::ModelParameters, ac::AbstractAdjustmentCost,
+                                  params::ModelParameters,
+                                  ac_begin::AbstractAdjustmentCost,
+                                  ac_mid_year::AbstractAdjustmentCost,
                                   derived::DerivedParameters) -> (Float64, Float64)
 
 Solve beginning-of-year problem: choose I to maximize value.
@@ -202,7 +198,9 @@ Uses precomputed profits via get_profit(grids, i_K, i_D) for O(1) lookup.
 """
 function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
                                       V::Array{Float64,3}, grids::StateGrids,
-                                      params::ModelParameters, ac::AbstractAdjustmentCost,
+                                      params::ModelParameters,
+                                      ac_begin::AbstractAdjustmentCost,
+                                      ac_mid_year::AbstractAdjustmentCost,
                                       derived::DerivedParameters)
     # Current state
     K = get_K(grids, i_K)
@@ -222,29 +220,12 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
             return -1e10
         end
 
-        # Initial adjustment cost
-        # Note: For most cost types, this depends on I only (Delta_I = 0 at this stage)
-        # Exception: ConvexAdjustmentCost depends on total I + Delta_I,
-        # but here we're just making initial decision, so we use a placeholder
-        # The full cost will be computed in mid-year problem
-
-        # For separate costs, only charge C_1(I, K)
-        if ac isa SeparateConvexCost
-            cost = 0.5 * ac.phi_1 * (I / K)^2 * K
-        elseif ac isa NoAdjustmentCost
-            cost = 0.0
-        elseif ac isa ConvexAdjustmentCost
-            # For standard convex, we need to anticipate Delta_I
-            # Simplified: assume Delta_I = 0 for now (will be optimized in mid-year)
-            cost = 0.5 * ac.phi * (I / K)^2 * K
-        else
-            # For other types, compute cost assuming Delta_I = 0
-            cost = compute_cost(ac, I, 0.0, K)
-        end
+        # Beginning-of-year adjustment cost: cost on I only
+        cost = compute_cost(ac_begin, I, 0.0, K)
 
         # Continuation value (pass i_K for precomputed profit access)
         W_value = compute_midyear_continuation(
-            K_prime, i_D, i_sigma, i_K, K, I, V, grids, params, ac, derived
+            K_prime, i_D, i_sigma, i_K, K, I, V, grids, params, ac_mid_year, derived
         )
 
         return -cost + W_value
@@ -259,10 +240,10 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
     I_min = max(I_min, -(1 - derived.delta_semester) * K + 1e-6)
 
     # Optimize
-    if ac isa NoAdjustmentCost && !has_fixed_cost(ac)
+    if ac_begin isa NoAdjustmentCost && !has_fixed_cost(ac_begin)
         # Can use coarser search for faster convergence
         I_opt, val = maximize_univariate(obj_I, I_min, I_max; method=:brent, tol=1e-5)
-    elseif has_fixed_cost(ac)
+    elseif has_fixed_cost(ac_begin)
         # Discrete choice
         value_no_invest = pi_first + obj_I(0.0)
 
@@ -293,7 +274,9 @@ end
 """
     bellman_operator!(V_new::Array{Float64,3}, V::Array{Float64,3},
                       I_policy::Array{Float64,3}, grids::StateGrids,
-                      params::ModelParameters, ac::AbstractAdjustmentCost,
+                      params::ModelParameters,
+                      ac_begin::AbstractAdjustmentCost,
+                      ac_mid_year::AbstractAdjustmentCost,
                       derived::DerivedParameters) -> Nothing
 
 Apply Bellman operator: V_new = T(V).
@@ -307,14 +290,16 @@ For each state (K, D, sigma):
 """
 function bellman_operator!(V_new::Array{Float64,3}, V::Array{Float64,3},
                           I_policy::Array{Float64,3}, grids::StateGrids,
-                          params::ModelParameters, ac::AbstractAdjustmentCost,
+                          params::ModelParameters,
+                          ac_begin::AbstractAdjustmentCost,
+                          ac_mid_year::AbstractAdjustmentCost,
                           derived::DerivedParameters)
     # Loop over all states
     for i_sigma in 1:grids.n_sigma
         for i_D in 1:grids.n_D
             for i_K in 1:grids.n_K
                 I_opt, V_value = solve_beginning_year_problem(
-                    i_K, i_D, i_sigma, V, grids, params, ac, derived
+                    i_K, i_D, i_sigma, V, grids, params, ac_begin, ac_mid_year, derived
                 )
 
                 V_new[i_K, i_D, i_sigma] = V_value
@@ -327,26 +312,11 @@ function bellman_operator!(V_new::Array{Float64,3}, V::Array{Float64,3},
 end
 
 """
-    bellman_operator_no_ac!(V_new::Array{Float64,3}, V::Array{Float64,3},
-                           I_policy::Array{Float64,3}, grids::StateGrids,
-                           params::ModelParameters, derived::DerivedParameters) -> Nothing
-
-Simplified Bellman operator for no adjustment costs case.
-
-This is more efficient than the general case.
-"""
-function bellman_operator_no_ac!(V_new::Array{Float64,3}, V::Array{Float64,3},
-                                I_policy::Array{Float64,3}, grids::StateGrids,
-                                params::ModelParameters, derived::DerivedParameters)
-    ac = NoAdjustmentCost()
-    bellman_operator!(V_new, V, I_policy, grids, params, ac, derived)
-    return nothing
-end
-
-"""
     howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3},
                             grids::StateGrids, params::ModelParameters,
-                            ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                            ac_begin::AbstractAdjustmentCost,
+                            ac_mid_year::AbstractAdjustmentCost,
+                            derived::DerivedParameters,
                             n_steps::Int) -> Nothing
 
 Perform Howard improvement (policy iteration) steps.
@@ -360,7 +330,9 @@ This accelerates VFI convergence.
 """
 function howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3},
                                  grids::StateGrids, params::ModelParameters,
-                                 ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                                 ac_begin::AbstractAdjustmentCost,
+                                 ac_mid_year::AbstractAdjustmentCost,
+                                 derived::DerivedParameters,
                                  n_steps::Int)
     V_temp = copy(V)
 
@@ -380,15 +352,11 @@ function howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3
                     K_prime = (1 - derived.delta_semester) * K + I
 
                     # Initial cost
-                    if ac isa SeparateConvexCost
-                        cost_I = 0.5 * ac.phi_1 * (I / K)^2 * K
-                    else
-                        cost_I = compute_cost(ac, I, 0.0, K)
-                    end
+                    cost_I = compute_cost(ac_begin, I, 0.0, K)
 
                     # Mid-year continuation (using current V, pass i_K for precomputed profits)
                     W_val = compute_midyear_continuation(
-                        K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac, derived
+                        K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac_mid_year, derived
                     )
 
                     # Update value
@@ -410,7 +378,9 @@ end
 """
     bellman_operator_parallel!(V_new::Array{Float64,3}, V::Array{Float64,3},
                                I_policy::Array{Float64,3}, grids::StateGrids,
-                               params::ModelParameters, ac::AbstractAdjustmentCost,
+                               params::ModelParameters,
+                               ac_begin::AbstractAdjustmentCost,
+                               ac_mid_year::AbstractAdjustmentCost,
                                derived::DerivedParameters) -> Nothing
 
 Parallel version of the Bellman operator using multi-threading.
@@ -433,7 +403,9 @@ Performance notes:
 """
 function bellman_operator_parallel!(V_new::Array{Float64,3}, V::Array{Float64,3},
                                     I_policy::Array{Float64,3}, grids::StateGrids,
-                                    params::ModelParameters, ac::AbstractAdjustmentCost,
+                                    params::ModelParameters,
+                                    ac_begin::AbstractAdjustmentCost,
+                                    ac_mid_year::AbstractAdjustmentCost,
                                     derived::DerivedParameters)
     n_K = grids.n_K
     n_D = grids.n_D
@@ -452,7 +424,7 @@ function bellman_operator_parallel!(V_new::Array{Float64,3}, V::Array{Float64,3}
 
         # Solve optimization for this state
         I_opt, V_value = solve_beginning_year_problem(
-            i_K, i_D, i_sigma, V, grids, params, ac, derived
+            i_K, i_D, i_sigma, V, grids, params, ac_begin, ac_mid_year, derived
         )
 
         # Store results (no race condition - each idx writes to unique location)
@@ -466,7 +438,9 @@ end
 """
     howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{Float64,3},
                                       grids::StateGrids, params::ModelParameters,
-                                      ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                                      ac_begin::AbstractAdjustmentCost,
+                                      ac_mid_year::AbstractAdjustmentCost,
+                                      derived::DerivedParameters,
                                       n_steps::Int) -> Nothing
 
 Parallel version of Howard improvement (policy iteration) steps.
@@ -481,7 +455,9 @@ Thread safety:
 """
 function howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{Float64,3},
                                            grids::StateGrids, params::ModelParameters,
-                                           ac::AbstractAdjustmentCost, derived::DerivedParameters,
+                                           ac_begin::AbstractAdjustmentCost,
+                                           ac_mid_year::AbstractAdjustmentCost,
+                                           derived::DerivedParameters,
                                            n_steps::Int)
     n_K = grids.n_K
     n_D = grids.n_D
@@ -511,15 +487,11 @@ function howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{
             K_prime = (1 - derived.delta_semester) * K + I
 
             # Initial cost
-            if ac isa SeparateConvexCost
-                cost_I = 0.5 * ac.phi_1 * (I / K)^2 * K
-            else
-                cost_I = compute_cost(ac, I, 0.0, K)
-            end
+            cost_I = compute_cost(ac_begin, I, 0.0, K)
 
             # Mid-year continuation (using V_temp which is read-only this step, pass i_K for precomputed profits)
             W_val = compute_midyear_continuation(
-                K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac, derived
+                K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac_mid_year, derived
             )
 
             # Update value (no race condition)
