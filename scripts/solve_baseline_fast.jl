@@ -90,7 +90,7 @@ println("="^70)
 
 println("\n2. Solving baseline model (no adjustment costs)...")
 
-sol_baseline = solve_model(params; ac=SeparateConvexCost(), verbose=true)
+sol_baseline = solve_model(params; ac=NoAdjustmentCost(), verbose=true)
 
 
 # Save solution

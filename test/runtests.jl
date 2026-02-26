@@ -200,4 +200,7 @@ end
 # Include comprehensive parallelization tests
 include("test_parallelization.jl")
 
+# Include separate adjustment cost tests
+include("test_separate_costs.jl")
+
 println("\n All tests passed!")

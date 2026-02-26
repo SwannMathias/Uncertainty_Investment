@@ -100,45 +100,7 @@ has_fixed_cost(::ConvexAdjustmentCost) = false
 is_differentiable(::ConvexAdjustmentCost) = true
 
 # =============================================================================
-# 3. Separate Convex Costs (Initial vs Revision)
-# =============================================================================
-
-"""
-    SeparateConvexCost
-
-Separate quadratic costs for initial investment and revision:
-C(I, Delta_I, K) = (phi_1/2) * (I/K)^2 * K + (phi_2/2) * (Delta_I/K)^2 * K
-"""
-@with_kw struct SeparateConvexCost <: AbstractAdjustmentCost
-    phi_1::Float64 = 1.0   # Initial investment cost
-    phi_2::Float64 = 1.0   # Revision cost
-
-    function SeparateConvexCost(phi_1, phi_2)
-        @assert phi_1 >= 0.0 "phi_1 must be non-negative"
-        @assert phi_2 >= 0.0 "phi_2 must be non-negative"
-        new(phi_1, phi_2)
-    end
-end
-
-function compute_cost(ac::SeparateConvexCost, I, Delta_I, K)
-    cost_I = 0.5 * ac.phi_1 * (I / K)^2 * K
-    cost_Delta_I = 0.5 * ac.phi_2 * (Delta_I / K)^2 * K
-    return cost_I + cost_Delta_I
-end
-
-function marginal_cost_I(ac::SeparateConvexCost, I, Delta_I, K)
-    return ac.phi_1 * (I / K)
-end
-
-function marginal_cost_Delta_I(ac::SeparateConvexCost, I, Delta_I, K)
-    return ac.phi_2 * (Delta_I / K)
-end
-
-has_fixed_cost(::SeparateConvexCost) = false
-is_differentiable(::SeparateConvexCost) = true
-
-# =============================================================================
-# 4. Fixed Adjustment Cost
+# 3. Fixed Adjustment Cost
 # =============================================================================
 
 """
@@ -176,107 +138,7 @@ has_fixed_cost(::FixedAdjustmentCost) = true
 is_differentiable(::FixedAdjustmentCost) = false
 
 # =============================================================================
-# 5. Asymmetric Adjustment Cost
-# =============================================================================
-
-"""
-    AsymmetricAdjustmentCost
-
-Different convex costs for positive vs negative net investment:
-C(I, Delta_I, K) = phi_plus * (I_total^+)^2 / K + phi_minus * (I_total^-)^2 / K
-
-where I_total^+ = max(I_total, 0) and I_total^- = max(-I_total, 0).
-"""
-@with_kw struct AsymmetricAdjustmentCost <: AbstractAdjustmentCost
-    phi_plus::Float64 = 1.0   # Cost for expansion
-    phi_minus::Float64 = 2.0  # Cost for contraction (typically higher)
-
-    function AsymmetricAdjustmentCost(phi_plus, phi_minus)
-        @assert phi_plus >= 0.0 "phi_plus must be non-negative"
-        @assert phi_minus >= 0.0 "phi_minus must be non-negative"
-        new(phi_plus, phi_minus)
-    end
-end
-
-function compute_cost(ac::AsymmetricAdjustmentCost, I, Delta_I, K)
-    I_total = I + Delta_I
-
-    if I_total > 0
-        return ac.phi_plus * I_total^2 / K
-    else
-        return ac.phi_minus * I_total^2 / K
-    end
-end
-
-function marginal_cost_I(ac::AsymmetricAdjustmentCost, I, Delta_I, K)
-    I_total = I + Delta_I
-
-    if I_total > 0
-        return 2 * ac.phi_plus * I_total / K
-    else
-        return 2 * ac.phi_minus * I_total / K
-    end
-end
-
-function marginal_cost_Delta_I(ac::AsymmetricAdjustmentCost, I, Delta_I, K)
-    # Same as marginal_cost_I since both affect I_total
-    return marginal_cost_I(ac, I, Delta_I, K)
-end
-
-has_fixed_cost(::AsymmetricAdjustmentCost) = false
-is_differentiable(::AsymmetricAdjustmentCost) = false  # Kink at zero
-
-# =============================================================================
-# 6. Partial Irreversibility
-# =============================================================================
-
-"""
-    PartialIrreversibility
-
-Capital can be sold but at fraction p_S < 1 of purchase price:
-C(I, Delta_I, K) = -(1 - p_S) * max(-(I + Delta_I), 0)
-
-This creates an asymmetry: selling capital is costly.
-"""
-@with_kw struct PartialIrreversibility <: AbstractAdjustmentCost
-    p_S::Float64 = 0.8  # Resale price as fraction of purchase price
-
-    function PartialIrreversibility(p_S)
-        @assert 0.0 <= p_S <= 1.0 "p_S must be in [0, 1]"
-        new(p_S)
-    end
-end
-
-function compute_cost(ac::PartialIrreversibility, I, Delta_I, K)
-    I_total = I + Delta_I
-
-    if I_total < 0
-        # Selling: lose (1 - p_S) fraction
-        return -(1 - ac.p_S) * I_total
-    else
-        return 0.0
-    end
-end
-
-function marginal_cost_I(ac::PartialIrreversibility, I, Delta_I, K)
-    I_total = I + Delta_I
-
-    if I_total < 0
-        return -(1 - ac.p_S)
-    else
-        return 0.0
-    end
-end
-
-function marginal_cost_Delta_I(ac::PartialIrreversibility, I, Delta_I, K)
-    return marginal_cost_I(ac, I, Delta_I, K)
-end
-
-has_fixed_cost(::PartialIrreversibility) = false
-is_differentiable(::PartialIrreversibility) = false  # Kink at zero
-
-# =============================================================================
-# 7. Composite Adjustment Cost
+# 4. Composite Adjustment Cost
 # =============================================================================
 
 """
@@ -332,14 +194,8 @@ function describe_adjustment_cost(ac::AbstractAdjustmentCost)
         return "No adjustment costs"
     elseif ac isa ConvexAdjustmentCost
         return "Convex: ($(ac.phi)/2) * (I_total/K)²"
-    elseif ac isa SeparateConvexCost
-        return "Separate convex: phi_1=$(ac.phi_1) (initial), phi_2=$(ac.phi_2) (revision)"
     elseif ac isa FixedAdjustmentCost
         return "Fixed cost: F=$(ac.F)"
-    elseif ac isa AsymmetricAdjustmentCost
-        return "Asymmetric: phi_plus=$(ac.phi_plus), phi_minus=$(ac.phi_minus)"
-    elseif ac isa PartialIrreversibility
-        return "Partial irreversibility: resale price=$(ac.p_S)"
     elseif ac isa CompositeAdjustmentCost
         desc = "Composite: " * join([describe_adjustment_cost(c) for c in ac.components], " + ")
         return desc

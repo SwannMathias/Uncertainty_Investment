@@ -125,7 +125,7 @@ function simulate_firm(sol::SolvedModel, D_path::Vector{Float64}, sigma_path::Ve
         # This requires solving the optimization problem
         Delta_I_opt, _ = solve_midyear_problem(
             K_prime, i_D_half, i_sigma_half, i_K, K_current, I,
-            sol.V, grids, sol.params, sol.ac, derived
+            sol.V, grids, sol.params, sol.ac_mid_year, derived
         )
         Delta_I[year] = Delta_I_opt
 

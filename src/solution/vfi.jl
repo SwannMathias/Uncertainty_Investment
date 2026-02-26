@@ -65,7 +65,8 @@ Container for solved model including value and policy functions.
 struct SolvedModel
     params::ModelParameters
     grids::StateGrids
-    ac::AbstractAdjustmentCost
+    ac_begin::AbstractAdjustmentCost
+    ac_mid_year::AbstractAdjustmentCost
     V::Array{Float64,3}           # V[i_K, i_D, i_sigma]
     I_policy::Array{Float64,3}    # I[i_K, i_D, i_sigma]
     Delta_I_policy::Union{Nothing,Array{Float64,5}}  # Delta_I[i_K, i_D, i_sigma, i_D_half, i_sigma_half] (optional)
@@ -101,7 +102,8 @@ To check/set the number of threads:
 - SolvedModel object with solution
 """
 function value_function_iteration(grids::StateGrids, params::ModelParameters,
-                                 ac::AbstractAdjustmentCost;
+                                 ac_begin::AbstractAdjustmentCost,
+                                 ac_mid_year::AbstractAdjustmentCost;
                                  V_init=nothing, verbose=true, use_parallel=true)
     derived = get_derived_parameters(params)
 
@@ -142,7 +144,8 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
         println("Value Function Iteration")
         println("="^70)
         println("Grid size: $(grids.n_K) × $(grids.n_D) × $(grids.n_sigma) = $(grids.n_K * grids.n_D * grids.n_sigma)")
-        println("Adjustment cost: $(describe_adjustment_cost(ac))")
+        println("Adjustment cost (begin): $(describe_adjustment_cost(ac_begin))")
+        println("Adjustment cost (mid-year): $(describe_adjustment_cost(ac_mid_year))")
         if use_parallel_actual
             println("Parallelization: ENABLED ($n_threads threads)")
         else
@@ -163,9 +166,9 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
 
         # Apply Bellman operator (parallel or serial)
         if use_parallel_actual
-            bellman_operator_parallel!(V_new, V, I_policy, grids, params, ac, derived)
+            bellman_operator_parallel!(V_new, V, I_policy, grids, params, ac_begin, ac_mid_year, derived)
         else
-            bellman_operator!(V_new, V, I_policy, grids, params, ac, derived)
+            bellman_operator!(V_new, V, I_policy, grids, params, ac_begin, ac_mid_year, derived)
         end
 
         # Check convergence
@@ -207,10 +210,10 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
         # Howard improvement steps (parallel or serial)
         if params.numerical.howard_steps > 0 && iter % 20 == 0
             if use_parallel_actual
-                howard_improvement_step_parallel!(V, I_policy, grids, params, ac, derived,
+                howard_improvement_step_parallel!(V, I_policy, grids, params, ac_begin, ac_mid_year, derived,
                                                   params.numerical.howard_steps)
             else
-                howard_improvement_step!(V, I_policy, grids, params, ac, derived,
+                howard_improvement_step!(V, I_policy, grids, params, ac_begin, ac_mid_year, derived,
                                         params.numerical.howard_steps)
             end
         end
@@ -230,7 +233,7 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
         threads_used = use_parallel_actual ? n_threads : 1
     )
 
-    return SolvedModel(params, grids, ac, V, I_policy, nothing, convergence)
+    return SolvedModel(params, grids, ac_begin, ac_mid_year, V, I_policy, nothing, convergence)
 end
 
 """
@@ -275,7 +278,25 @@ sol_fast = solve_model(params; ac=ConvexAdjustmentCost(phi=2.0), use_multiscale=
 sol_serial = solve_model(params; ac=ConvexAdjustmentCost(phi=2.0), use_parallel=false)
 ```
 """
-function solve_model(params::ModelParameters; ac=NoAdjustmentCost(), verbose=true, use_parallel=true, use_multiscale=false)
+function solve_model(params::ModelParameters;
+                    ac::Union{AbstractAdjustmentCost,Nothing}=nothing,
+                    ac_begin::Union{AbstractAdjustmentCost,Nothing}=nothing,
+                    ac_mid_year::Union{AbstractAdjustmentCost,Nothing}=nothing,
+                    verbose=true, use_parallel=true, use_multiscale=false)
+    # --- Backward compatibility logic ---
+    if !isnothing(ac)
+        if !isnothing(ac_begin) || !isnothing(ac_mid_year)
+            error("Cannot specify both 'ac' and 'ac_begin'/'ac_mid_year'. Use one or the other.")
+        end
+        # Old API: single ac applies to both stages
+        ac_begin_resolved = ac
+        ac_mid_year_resolved = ac
+    else
+        # New API (or default: no costs)
+        ac_begin_resolved = isnothing(ac_begin) ? NoAdjustmentCost() : ac_begin
+        ac_mid_year_resolved = isnothing(ac_mid_year) ? NoAdjustmentCost() : ac_mid_year
+    end
+
     # Validate parameters
     if !validate_parameters(params)
         error("Invalid parameter configuration")
@@ -283,7 +304,8 @@ function solve_model(params::ModelParameters; ac=NoAdjustmentCost(), verbose=tru
 
     # Use multi-scale solver if requested
     if use_multiscale
-        return solve_model_multiscale(params; ac=ac, verbose=verbose, use_parallel=use_parallel)
+        return solve_model_multiscale(params; ac_begin=ac_begin_resolved, ac_mid_year=ac_mid_year_resolved,
+                                     verbose=verbose, use_parallel=use_parallel)
     end
 
     # Construct grids
@@ -297,7 +319,8 @@ function solve_model(params::ModelParameters; ac=NoAdjustmentCost(), verbose=tru
     end
 
     # Solve using VFI
-    sol = value_function_iteration(grids, params, ac; verbose=verbose, use_parallel=use_parallel)
+    sol = value_function_iteration(grids, params, ac_begin_resolved, ac_mid_year_resolved;
+                                   verbose=verbose, use_parallel=use_parallel)
 
     # Diagnostics
     if verbose
@@ -567,7 +590,8 @@ sol = solve_model_multiscale(params; ac=ConvexAdjustmentCost(phi=2.0))
 """
 function solve_model_multiscale(
     params::ModelParameters;
-    ac::AbstractAdjustmentCost = NoAdjustmentCost(),
+    ac_begin::AbstractAdjustmentCost = NoAdjustmentCost(),
+    ac_mid_year::AbstractAdjustmentCost = NoAdjustmentCost(),
     verbose::Bool = true,
     use_parallel::Bool = true
 ) :: SolvedModel
@@ -612,7 +636,7 @@ function solve_model_multiscale(
 
     grids_coarse = construct_grids(params_coarse)
     sol_coarse = value_function_iteration(
-        grids_coarse, params_coarse, ac;
+        grids_coarse, params_coarse, ac_begin, ac_mid_year;
         V_init = nothing,
         verbose = verbose,
         use_parallel = use_parallel
@@ -644,7 +668,7 @@ function solve_model_multiscale(
     end
 
     sol_fine = value_function_iteration(
-        grids_fine, params, ac;
+        grids_fine, params, ac_begin, ac_mid_year;
         V_init = V_init_fine,
         verbose = verbose,
         use_parallel = use_parallel
