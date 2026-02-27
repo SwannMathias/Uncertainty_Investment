@@ -133,6 +133,8 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
     I_policy = zeros(grids.n_K, grids.n_D, grids.n_sigma)
     I_policy_old = zeros(grids.n_K, grids.n_D, grids.n_sigma)
     EV_cache = zeros(grids.n_K, grids.n_states)
+    # Mid-year policy: Delta_I_mid_policy[i_K, i_D, i_sigma, i_state_half] = optimal ΔI
+    Delta_I_mid_policy = zeros(grids.n_K, grids.n_D, grids.n_sigma, grids.n_states)
 
     # VFI iteration
     iter = 0
@@ -208,19 +210,33 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
             break
         end
 
-        # Update value function
-        V .= V_new
-
-        # Howard improvement steps (parallel or serial)
-        if params.numerical.howard_steps > 0 && iter % 20 == 0
+        # Record mid-year policy and run full Howard steps (every iteration)
+        if params.numerical.howard_steps > 0
+            # Record optimal ΔI for every state and mid-year realization under current I_policy and V_new
+            precompute_expectation_cache!(EV_cache, V_new, grids; horizon=:semester)
             if use_parallel_actual
-                howard_improvement_step_parallel!(V, I_policy, grids, params, ac_begin, ac_mid_year, derived,
-                                                  params.numerical.howard_steps)
+                record_midyear_policy_parallel!(Delta_I_mid_policy, I_policy, V_new,
+                                                grids, params, ac_mid_year, derived, EV_cache)
             else
-                howard_improvement_step!(V, I_policy, grids, params, ac_begin, ac_mid_year, derived,
-                                        params.numerical.howard_steps)
+                record_midyear_policy!(Delta_I_mid_policy, I_policy, V_new,
+                                       grids, params, ac_mid_year, derived, EV_cache)
+            end
+
+            # Run cheap full Howard steps: lookup + interpolation only, no optimizers
+            for m in 1:params.numerical.howard_steps
+                precompute_expectation_cache!(EV_cache, V_new, grids; horizon=:semester)
+                if use_parallel_actual
+                    howard_full_step_parallel!(V_new, I_policy, Delta_I_mid_policy,
+                                               grids, params, ac_begin, ac_mid_year, derived, EV_cache)
+                else
+                    howard_full_step!(V_new, I_policy, Delta_I_mid_policy,
+                                      grids, params, ac_begin, ac_mid_year, derived, EV_cache)
+                end
             end
         end
+
+        # Update value function
+        V .= V_new
 
         if iter == params.numerical.max_iter
             @warn "VFI did not converge after $iter iterations. Distance: $dist"

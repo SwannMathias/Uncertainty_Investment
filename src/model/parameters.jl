@@ -55,7 +55,7 @@ Numerical solution parameters including grid sizes and convergence tolerances.
     max_iter::Int = 1000          # Maximum VFI iterations
 
     # Acceleration
-    howard_steps::Int = 0         # Howard improvement steps (0 = disabled)
+    howard_steps::Int = 50        # Howard improvement steps (0 = disabled)
 
     # Interpolation
     interp_method::Symbol = :linear  # :linear or :cubic
