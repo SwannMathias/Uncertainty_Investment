@@ -236,16 +236,8 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
     # First-semester profit - use precomputed value
     pi_first = get_profit(grids, i_K, i_D)
 
-    # Precompute W(K', D, sigma) on the K grid once for this state.
-    W_grid = zeros(grids.n_K)
-    for i_K_prime in 1:grids.n_K
-        W_grid[i_K_prime] = compute_midyear_continuation(
-            grids.K_grid[i_K_prime], i_D, i_sigma, i_K, K, 0.0, V, grids, params,
-            ac_mid_year, derived, EV_cache
-        )
-    end
-
     # Objective function: maximize over I
+    # Calls compute_midyear_continuation directly at the exact K' proposed by the optimizer.
     function obj_I(I)
         K_prime = (1 - derived.delta_semester) * K + I
 
@@ -260,8 +252,11 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
         # Beginning-of-year adjustment cost: cost on I only
         cost = compute_cost(ac_begin, I, 0.0, K)
 
-        # Continuation value from cached W grid (interpolate in K')
-        W_value = linear_interp_1d(grids.K_grid, W_grid, K_prime)
+        # Continuation value: call compute_midyear_continuation at exact K'
+        W_value = compute_midyear_continuation(
+            K_prime, i_D, i_sigma, i_K, K, I, V, grids, params,
+            ac_mid_year, derived, EV_cache
+        )
 
         return -cost + W_value
     end
@@ -275,14 +270,7 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
     I_min = max(I_min, -(1 - derived.delta_semester) * K + 1e-6)
 
     # Optimize
-    if ac_begin isa NoAdjustmentCost && !has_fixed_cost(ac_begin)
-        # No cost case: solve directly on grid then map back to investment.
-        i_K_prime_opt = argmax(W_grid)
-        K_prime_opt = grids.K_grid[i_K_prime_opt]
-        I_opt = K_prime_opt - (1 - derived.delta_semester) * K
-        I_opt = clamp(I_opt, I_min, I_max)
-        val = obj_I(I_opt)
-    elseif has_fixed_cost(ac_begin)
+    if has_fixed_cost(ac_begin)
         # Discrete choice
         value_no_invest = pi_first + obj_I(0.0)
 

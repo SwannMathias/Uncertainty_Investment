@@ -7,7 +7,7 @@ Provides efficient interpolation methods used in solution algorithms.
 using Interpolations
 
 """
-    linear_interp_1d(x_grid::Vector{Float64}, y_vals::Vector{Float64}, x::Float64) -> Float64
+    linear_interp_1d(x_grid::Vector{Float64}, y_vals::AbstractVector{Float64}, x::Float64) -> Float64
 
 Simple linear interpolation for 1D functions.
 
@@ -19,7 +19,7 @@ Simple linear interpolation for 1D functions.
 # Returns
 - Interpolated value at x
 """
-function linear_interp_1d(x_grid::Vector{Float64}, y_vals::Vector{Float64}, x::Float64)
+function linear_interp_1d(x_grid::Vector{Float64}, y_vals::AbstractVector{Float64}, x::Float64)
     n = length(x_grid)
     @assert length(y_vals) == n "Grid and values must have same length"
     @assert issorted(x_grid) "Grid must be sorted"
