@@ -298,3 +298,258 @@ function howard_improvement_step_parallel!(V0::Array{Float64,3}, V1::Array{Float
     howard_improvement_step!(V0, V1, I_policy, Delta_I_policy,
                              grids, params, ac_begin, ac_mid_year, derived, n_steps)
 end
+
+# ============================================================================
+# Full Howard Acceleration (fix both I and ΔI policies)
+# ============================================================================
+
+"""
+    record_midyear_policy!(Delta_I_mid, I_policy, V, grids, params, ac_mid_year, derived, EV_cache)
+
+Record the optimal mid-year investment revision ΔI* for every state and every
+mid-year realization, given fixed beginning-of-year policy I_policy and current
+value function V.
+
+After each Bellman step, call this function once (cost ≈ 1 old Howard step).
+The stored Delta_I_mid array is then used by howard_full_step! for cheap
+policy-evaluation steps with no optimizers.
+
+# Arguments
+- `Delta_I_mid`: (n_K, n_D, n_sigma, n_states) output array — modified in place
+- `I_policy`: (n_K, n_D, n_sigma) fixed beginning-of-year policy
+- `V`: (n_K, n_D, n_sigma) current value function
+- `EV_cache`: (n_K, n_states) precomputed expectations E[V(K,·)|state]
+"""
+function record_midyear_policy!(
+    Delta_I_mid::Array{Float64,4},
+    I_policy::Array{Float64,3},
+    V::Array{Float64,3},
+    grids::StateGrids,
+    params::ModelParameters,
+    ac_mid_year::AbstractAdjustmentCost,
+    derived::DerivedParameters,
+    EV_cache::AbstractMatrix{Float64}
+)
+    n_K = grids.n_K
+    n_D = grids.n_D
+    n_sigma = grids.n_sigma
+    n_states = grids.n_states
+
+    for i_sigma in 1:n_sigma
+        for i_D in 1:n_D
+            for i_K in 1:n_K
+                K = get_K(grids, i_K)
+                I_opt = I_policy[i_K, i_D, i_sigma]
+                K_prime = (1.0 - derived.delta_semester) * K + I_opt
+
+                for i_state_half in 1:n_states
+                    i_D_half, i_sigma_half = get_D_sigma_indices(grids, i_state_half)
+
+                    Delta_I_opt, _ = solve_midyear_problem(
+                        K_prime, i_D_half, i_sigma_half,
+                        i_K, K, I_opt,
+                        V, grids, params,
+                        ac_mid_year, derived, EV_cache
+                    )
+
+                    Delta_I_mid[i_K, i_D, i_sigma, i_state_half] = Delta_I_opt
+                end
+            end
+        end
+    end
+    return nothing
+end
+
+"""
+    record_midyear_policy_parallel!(Delta_I_mid, I_policy, V, grids, params, ac_mid_year, derived, EV_cache)
+
+Parallel version of record_midyear_policy! using multi-threading.
+"""
+function record_midyear_policy_parallel!(
+    Delta_I_mid::Array{Float64,4},
+    I_policy::Array{Float64,3},
+    V::Array{Float64,3},
+    grids::StateGrids,
+    params::ModelParameters,
+    ac_mid_year::AbstractAdjustmentCost,
+    derived::DerivedParameters,
+    EV_cache::AbstractMatrix{Float64}
+)
+    n_K = grids.n_K
+    n_D = grids.n_D
+    n_sigma = grids.n_sigma
+    n_states = grids.n_states
+    total_states = n_K * n_D * n_sigma
+
+    @threads for idx in 1:total_states
+        # Convert linear index to 3D indices (column-major, matches bellman_operator_parallel!)
+        i_K = ((idx - 1) % n_K) + 1
+        temp = (idx - 1) ÷ n_K
+        i_D = (temp % n_D) + 1
+        i_sigma = (temp ÷ n_D) + 1
+
+        K = get_K(grids, i_K)
+        I_opt = I_policy[i_K, i_D, i_sigma]
+        K_prime = (1.0 - derived.delta_semester) * K + I_opt
+
+        for i_state_half in 1:n_states
+            i_D_half, i_sigma_half = get_D_sigma_indices(grids, i_state_half)
+
+            Delta_I_opt, _ = solve_midyear_problem(
+                K_prime, i_D_half, i_sigma_half,
+                i_K, K, I_opt,
+                V, grids, params,
+                ac_mid_year, derived, EV_cache
+            )
+
+            Delta_I_mid[i_K, i_D, i_sigma, i_state_half] = Delta_I_opt
+        end
+    end
+    return nothing
+end
+
+"""
+    howard_full_step!(V, I_policy, Delta_I_mid, grids, params, ac_begin, ac_mid_year, derived, EV_cache)
+
+Cheap Howard policy-evaluation step using both fixed policies (I and ΔI).
+
+Unlike howard_improvement_step! which re-runs the ΔI optimizer for every
+mid-year realization, this function uses prerecorded Delta_I_mid values so
+each step is purely a lookup + interpolation with no optimizers.
+
+Cost per step: ~105 interpolations per state (vs ~105 optimizations before).
+
+# Arguments
+- `V`: (n_K, n_D, n_sigma) value function — modified in place
+- `I_policy`: (n_K, n_D, n_sigma) fixed beginning-of-year policy
+- `Delta_I_mid`: (n_K, n_D, n_sigma, n_states) fixed mid-year policy
+- `EV_cache`: (n_K, n_states) precomputed expectations (must reflect current V)
+"""
+function howard_full_step!(
+    V::Array{Float64,3},
+    I_policy::Array{Float64,3},
+    Delta_I_mid::Array{Float64,4},
+    grids::StateGrids,
+    params::ModelParameters,
+    ac_begin::AbstractAdjustmentCost,
+    ac_mid_year::AbstractAdjustmentCost,
+    derived::DerivedParameters,
+    EV_cache::AbstractMatrix{Float64}
+)
+    n_K = grids.n_K
+    n_D = grids.n_D
+    n_sigma = grids.n_sigma
+    n_states = grids.n_states
+    beta = derived.beta_semester
+
+    for i_sigma in 1:n_sigma
+        for i_D in 1:n_D
+            i_state = get_joint_state_index(grids, i_D, i_sigma)
+
+            for i_K in 1:n_K
+                K = get_K(grids, i_K)
+                I_opt = I_policy[i_K, i_D, i_sigma]
+                K_prime = (1.0 - derived.delta_semester) * K + I_opt
+
+                pi_first = get_profit(grids, i_K, i_D)
+                cost_I = compute_cost(ac_begin, I_opt, 0.0, K)
+
+                W_value = 0.0
+                for i_state_half in 1:n_states
+                    prob = grids.Pi_semester[i_state, i_state_half]
+                    if prob < 1e-15
+                        continue
+                    end
+
+                    i_D_half, i_sigma_half = get_D_sigma_indices(grids, i_state_half)
+                    Delta_I = Delta_I_mid[i_K, i_D, i_sigma, i_state_half]
+                    K_double_prime = K_prime + Delta_I
+
+                    # Mid-year profit uses beginning-of-year capital index (matches solve_midyear_problem)
+                    pi_half = get_profit(grids, i_K, i_D_half)
+                    # Mid-year cost: (0.0, Delta_I, K_current) matches solve_midyear_problem
+                    cost_delta_I = compute_cost(ac_mid_year, 0.0, Delta_I, K)
+
+                    EV_vec = @view EV_cache[:, i_state_half]
+                    K_dp_clamped = clamp(K_double_prime, grids.K_min, grids.K_max)
+                    EV_interp = linear_interp_1d(grids.K_grid, EV_vec, K_dp_clamped)
+
+                    value_half = pi_half - cost_delta_I + beta * EV_interp
+                    W_value += prob * value_half
+                end
+
+                V[i_K, i_D, i_sigma] = pi_first - cost_I + W_value
+            end
+        end
+    end
+    return nothing
+end
+
+"""
+    howard_full_step_parallel!(V, I_policy, Delta_I_mid, grids, params, ac_begin, ac_mid_year, derived, EV_cache)
+
+Parallel version of howard_full_step! using multi-threading.
+
+Thread safety: each thread writes to a distinct V[i_K, i_D, i_sigma] element.
+All reads (I_policy, Delta_I_mid, EV_cache, grids) are shared and read-only.
+"""
+function howard_full_step_parallel!(
+    V::Array{Float64,3},
+    I_policy::Array{Float64,3},
+    Delta_I_mid::Array{Float64,4},
+    grids::StateGrids,
+    params::ModelParameters,
+    ac_begin::AbstractAdjustmentCost,
+    ac_mid_year::AbstractAdjustmentCost,
+    derived::DerivedParameters,
+    EV_cache::AbstractMatrix{Float64}
+)
+    n_K = grids.n_K
+    n_D = grids.n_D
+    n_sigma = grids.n_sigma
+    n_states = grids.n_states
+    beta = derived.beta_semester
+    total_states = n_K * n_D * n_sigma
+
+    @threads for idx in 1:total_states
+        # Convert linear index to 3D indices (column-major, matches bellman_operator_parallel!)
+        i_K = ((idx - 1) % n_K) + 1
+        temp = (idx - 1) ÷ n_K
+        i_D = (temp % n_D) + 1
+        i_sigma = (temp ÷ n_D) + 1
+
+        K = get_K(grids, i_K)
+        I_opt = I_policy[i_K, i_D, i_sigma]
+        K_prime = (1.0 - derived.delta_semester) * K + I_opt
+
+        pi_first = get_profit(grids, i_K, i_D)
+        cost_I = compute_cost(ac_begin, I_opt, 0.0, K)
+
+        i_state = get_joint_state_index(grids, i_D, i_sigma)
+
+        W_value = 0.0
+        for i_state_half in 1:n_states
+            prob = grids.Pi_semester[i_state, i_state_half]
+            if prob < 1e-15
+                continue
+            end
+
+            i_D_half, i_sigma_half = get_D_sigma_indices(grids, i_state_half)
+            Delta_I = Delta_I_mid[i_K, i_D, i_sigma, i_state_half]
+            K_double_prime = K_prime + Delta_I
+
+            pi_half = get_profit(grids, i_K, i_D_half)
+            cost_delta_I = compute_cost(ac_mid_year, 0.0, Delta_I, K)
+
+            EV_vec = @view EV_cache[:, i_state_half]
+            K_dp_clamped = clamp(K_double_prime, grids.K_min, grids.K_max)
+            EV_interp = linear_interp_1d(grids.K_grid, EV_vec, K_dp_clamped)
+
+            value_half = pi_half - cost_delta_I + beta * EV_interp
+            W_value += prob * value_half
+        end
+
+        V[i_K, i_D, i_sigma] = pi_first - cost_I + W_value
+    end
+    return nothing
+end
