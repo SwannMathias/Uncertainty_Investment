@@ -137,8 +137,8 @@ function simulate_firm(sol::SolvedModel, D_path::Vector{Float64}, sigma_path::Ve
         # Total investment
         I_tot[year] = I + Delta_I_opt
 
-        # Next period capital
-        K[year + 1] = K_prime + Delta_I_opt
+        # Next period capital (apply second semester depreciation)
+        K[year + 1] = (1 - derived.delta_semester) * K_prime + Delta_I_opt
 
         # Annual profit
         pi1 = profit(K_current, D_level, derived)

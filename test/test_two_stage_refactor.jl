@@ -4,15 +4,16 @@ using UncertaintyInvestment
 function nested_stage1_value(K_stage1, i_D, i_sigma, i_K, K_current, V0, grids, params, ac_mid, derived, EV1_to_0)
     i_state = get_joint_state_index(grids, i_D, i_sigma)
     EV = @view EV1_to_0[:, i_state]
+    K_dep = (1 - derived.delta_semester) * K_stage1
     obj(ΔI) = begin
-        K_next = K_stage1 + ΔI
+        K_next = K_dep + ΔI
         if K_next < grids.K_min || K_next > grids.K_max
             return -1e12
         end
-        -compute_cost(ac_mid, 0.0, ΔI, K_current) + linear_interp_1d(grids.K_grid, EV, K_next)
+        -compute_cost(ac_mid, 0.0, ΔI, K_current) + params.beta * linear_interp_1d(grids.K_grid, EV, K_next)
     end
-    Δmin = max(grids.K_min - K_stage1, -K_stage1 + 1e-6)
-    Δmax = grids.K_max - K_stage1
+    Δmin = max(grids.K_min - K_dep, -K_dep + 1e-6)
+    Δmax = grids.K_max - K_dep
     Δ, v = maximize_univariate(obj, Δmin, Δmax; tol=1e-6)
     return Δ, v
 end
@@ -37,7 +38,8 @@ function nested_stage0_update!(V0_new, I_policy, V0, grids, params, ac_begin, ac
                 i_D_half, i_sigma_half = get_D_sigma_indices(grids, i_state_half)
                 _, v_half = nested_stage1_value(K_stage1, i_D_half, i_sigma_half, i_K, K, V0,
                                                 grids, params, ac_mid, derived, EV1_to_0)
-                cont += probs[i_state_half] * v_half
+                pi_mid = get_profit(grids, i_K, i_D_half)
+                cont += probs[i_state_half] * (pi_mid + v_half)
             end
             return pi_first - compute_cost(ac_begin, I, 0.0, K) + cont
         end

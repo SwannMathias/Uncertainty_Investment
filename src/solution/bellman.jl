@@ -61,8 +61,10 @@ function solve_midyear_problem(K_stage1::Float64, i_D::Int, i_sigma::Int,
     i_state = get_joint_state_index(grids, i_D, i_sigma)
     EV = @view EV1_to_0[:, i_state]
 
+    K_dep = (1 - derived.delta_semester) * K_stage1
+
     function obj_Delta_I(Delta_I)
-        K_next = K_stage1 + Delta_I
+        K_next = K_dep + Delta_I
         if K_next < grids.K_min
             return -Inf
         end
@@ -70,15 +72,15 @@ function solve_midyear_problem(K_stage1::Float64, i_D::Int, i_sigma::Int,
             return -1e10
         end
         cost = compute_cost(ac_mid_year, 0.0, Delta_I, K_current)
-        return -cost + linear_interp_1d(grids.K_grid, EV, K_next)
+        return -cost + params.beta * linear_interp_1d(grids.K_grid, EV, K_next)
     end
 
-    Delta_I_min = max(grids.K_min - K_stage1, -K_stage1 + 1e-6)
-    Delta_I_max = grids.K_max - K_stage1
+    Delta_I_min = max(grids.K_min - K_dep, -K_dep + 1e-6)
+    Delta_I_max = grids.K_max - K_dep
 
     if ac_mid_year isa NoAdjustmentCost
         i_opt = argmax(EV)
-        Delta = clamp(grids.K_grid[i_opt] - K_stage1, Delta_I_min, Delta_I_max)
+        Delta = clamp(grids.K_grid[i_opt] - K_dep, Delta_I_min, Delta_I_max)
         return Delta, obj_Delta_I(Delta)
     elseif has_fixed_cost(ac_mid_year)
         return _maximize_with_inaction(obj_Delta_I, Delta_I_min, Delta_I_max)
@@ -110,6 +112,14 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
     i_state = get_joint_state_index(grids, i_D, i_sigma)
     EV = @view EV0_to_1[:, i_state]
 
+    # Expected mid-year profit E[π(K, D_half) | D, σ] — constant w.r.t. I
+    probs_mid = @view grids.Pi_semester[i_state, :]
+    expected_pi_mid = 0.0
+    for i_state_half in 1:grids.n_states
+        i_D_half, _ = get_D_sigma_indices(grids, i_state_half)
+        expected_pi_mid += probs_mid[i_state_half] * get_profit(grids, i_K, i_D_half)
+    end
+
     function obj_I(I)
         K_stage1 = (1 - derived.delta_semester) * K + I
         if K_stage1 < grids.K_min
@@ -119,7 +129,7 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
             return -1e10
         end
         cost = compute_cost(ac_begin, I, 0.0, K)
-        return pi_first - cost + linear_interp_1d(grids.K_grid, EV, K_stage1)
+        return pi_first - cost + expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1)
     end
 
     I_min = max(grids.K_min - (1 - derived.delta_semester) * K,
@@ -215,8 +225,9 @@ function howard_improvement_step!(V0::Array{Float64,3}, V1::Array{Float64,3},
             ΔI = Delta_I_policy[i_K, i_D, i_sigma]
             i_state = get_joint_state_index(grids, i_D, i_sigma)
             EV = @view EV1_to_0[:, i_state]
+            K_next = (1 - derived.delta_semester) * K + ΔI
             V1[i_K, i_D, i_sigma] = -compute_cost(ac_mid_year, 0.0, ΔI, K) +
-                                    linear_interp_1d(grids.K_grid, EV, K + ΔI)
+                                    params.beta * linear_interp_1d(grids.K_grid, EV, K_next)
         end
 
         precompute_expectation_cache!(EV0_to_1, V1, grids; horizon=:semester)
@@ -226,8 +237,15 @@ function howard_improvement_step!(V0::Array{Float64,3}, V1::Array{Float64,3},
             i_state = get_joint_state_index(grids, i_D, i_sigma)
             EV = @view EV0_to_1[:, i_state]
             K_stage1 = (1 - derived.delta_semester) * K + I
+            # Expected mid-year profit E[π(K, D_half) | D, σ]
+            probs_mid = @view grids.Pi_semester[i_state, :]
+            expected_pi_mid = 0.0
+            for i_state_half in 1:grids.n_states
+                i_D_half, _ = get_D_sigma_indices(grids, i_state_half)
+                expected_pi_mid += probs_mid[i_state_half] * get_profit(grids, i_K, i_D_half)
+            end
             V0[i_K, i_D, i_sigma] = get_profit(grids, i_K, i_D) - compute_cost(ac_begin, I, 0.0, K) +
-                                    linear_interp_1d(grids.K_grid, EV, K_stage1)
+                                    expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1)
         end
     end
     return nothing
