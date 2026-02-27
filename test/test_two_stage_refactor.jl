@@ -4,16 +4,16 @@ using UncertaintyInvestment
 function nested_stage1_value(K_stage1, i_D, i_sigma, i_K, K_current, V0, grids, params, ac_mid, derived, EV1_to_0)
     i_state = get_joint_state_index(grids, i_D, i_sigma)
     EV = @view EV1_to_0[:, i_state]
-    K_dep = (1 - derived.delta_semester) * K_stage1
+    # No mid-year depreciation: capital stays at K_stage1 until end of year
     obj(ΔI) = begin
-        K_next = K_dep + ΔI
+        K_next = K_stage1 + ΔI
         if K_next < grids.K_min || K_next > grids.K_max
             return -1e12
         end
         -compute_cost(ac_mid, 0.0, ΔI, K_current) + params.beta * linear_interp_1d(grids.K_grid, EV, K_next)
     end
-    Δmin = max(grids.K_min - K_dep, -K_dep + 1e-6)
-    Δmax = grids.K_max - K_dep
+    Δmin = max(grids.K_min - K_stage1, -K_stage1 + 1e-6)
+    Δmax = grids.K_max - K_stage1
     Δ, v = maximize_univariate(obj, Δmin, Δmax; tol=1e-6)
     return Δ, v
 end
@@ -29,7 +29,7 @@ function nested_stage0_update!(V0_new, I_policy, V0, grids, params, ac_begin, ac
         probs = @view grids.Pi_semester[i_state, :]
 
         function obj_I(I)
-            K_stage1 = (1 - derived.delta_semester) * K + I
+            K_stage1 = (1 - derived.delta_annual) * K + I
             if K_stage1 < grids.K_min || K_stage1 > grids.K_max
                 return -1e12
             end
@@ -44,9 +44,9 @@ function nested_stage0_update!(V0_new, I_policy, V0, grids, params, ac_begin, ac
             return pi_first - compute_cost(ac_begin, I, 0.0, K) + cont
         end
 
-        Imin = max(grids.K_min - (1 - derived.delta_semester) * K,
-                   -(1 - derived.delta_semester) * K + 1e-6)
-        Imax = grids.K_max - (1 - derived.delta_semester) * K
+        Imin = max(grids.K_min - (1 - derived.delta_annual) * K,
+                   -(1 - derived.delta_annual) * K + 1e-6)
+        Imax = grids.K_max - (1 - derived.delta_annual) * K
         I_opt, V_opt = maximize_univariate(obj_I, Imin, Imax; tol=1e-6)
         I_policy[i_K, i_D, i_sigma] = I_opt
         V0_new[i_K, i_D, i_sigma] = V_opt

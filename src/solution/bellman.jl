@@ -61,10 +61,9 @@ function solve_midyear_problem(K_stage1::Float64, i_D::Int, i_sigma::Int,
     i_state = get_joint_state_index(grids, i_D, i_sigma)
     EV = @view EV1_to_0[:, i_state]
 
-    K_dep = (1 - derived.delta_semester) * K_stage1
-
+    # No mid-year depreciation: capital stays at K_stage1 until end of year
     function obj_Delta_I(Delta_I)
-        K_next = K_dep + Delta_I
+        K_next = K_stage1 + Delta_I
         if K_next < grids.K_min
             return -Inf
         end
@@ -75,12 +74,12 @@ function solve_midyear_problem(K_stage1::Float64, i_D::Int, i_sigma::Int,
         return -cost + params.beta * linear_interp_1d(grids.K_grid, EV, K_next)
     end
 
-    Delta_I_min = max(grids.K_min - K_dep, -K_dep + 1e-6)
-    Delta_I_max = grids.K_max - K_dep
+    Delta_I_min = max(grids.K_min - K_stage1, -K_stage1 + 1e-6)
+    Delta_I_max = grids.K_max - K_stage1
 
     if ac_mid_year isa NoAdjustmentCost
         i_opt = argmax(EV)
-        Delta = clamp(grids.K_grid[i_opt] - K_dep, Delta_I_min, Delta_I_max)
+        Delta = clamp(grids.K_grid[i_opt] - K_stage1, Delta_I_min, Delta_I_max)
         return Delta, obj_Delta_I(Delta)
     elseif has_fixed_cost(ac_mid_year)
         return _maximize_with_inaction(obj_Delta_I, Delta_I_min, Delta_I_max)
@@ -121,7 +120,7 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
     end
 
     function obj_I(I)
-        K_stage1 = (1 - derived.delta_semester) * K + I
+        K_stage1 = (1 - derived.delta_annual) * K + I
         if K_stage1 < grids.K_min
             return -Inf
         end
@@ -132,13 +131,13 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
         return pi_first - cost + expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1)
     end
 
-    I_min = max(grids.K_min - (1 - derived.delta_semester) * K,
-                -(1 - derived.delta_semester) * K + 1e-6)
-    I_max = grids.K_max - (1 - derived.delta_semester) * K
+    I_min = max(grids.K_min - (1 - derived.delta_annual) * K,
+                -(1 - derived.delta_annual) * K + 1e-6)
+    I_max = grids.K_max - (1 - derived.delta_annual) * K
 
     if ac_begin isa NoAdjustmentCost
         i_opt = argmax(EV)
-        I = clamp(grids.K_grid[i_opt] - (1 - derived.delta_semester) * K, I_min, I_max)
+        I = clamp(grids.K_grid[i_opt] - (1 - derived.delta_annual) * K, I_min, I_max)
         return I, obj_I(I)
     elseif has_fixed_cost(ac_begin)
         return _maximize_with_inaction(obj_I, I_min, I_max)
@@ -225,7 +224,7 @@ function howard_improvement_step!(V0::Array{Float64,3}, V1::Array{Float64,3},
             ΔI = Delta_I_policy[i_K, i_D, i_sigma]
             i_state = get_joint_state_index(grids, i_D, i_sigma)
             EV = @view EV1_to_0[:, i_state]
-            K_next = (1 - derived.delta_semester) * K + ΔI
+            K_next = K + ΔI  # No mid-year depreciation
             V1[i_K, i_D, i_sigma] = -compute_cost(ac_mid_year, 0.0, ΔI, K) +
                                     params.beta * linear_interp_1d(grids.K_grid, EV, K_next)
         end
@@ -236,7 +235,7 @@ function howard_improvement_step!(V0::Array{Float64,3}, V1::Array{Float64,3},
             I = I_policy[i_K, i_D, i_sigma]
             i_state = get_joint_state_index(grids, i_D, i_sigma)
             EV = @view EV0_to_1[:, i_state]
-            K_stage1 = (1 - derived.delta_semester) * K + I
+            K_stage1 = (1 - derived.delta_annual) * K + I
             # Expected mid-year profit E[π(K, D_half) | D, σ]
             probs_mid = @view grids.Pi_semester[i_state, :]
             expected_pi_mid = 0.0
@@ -358,7 +357,7 @@ function record_midyear_policy!(
             for i_K in 1:n_K
                 K = get_K(grids, i_K)
                 I_opt = I_policy[i_K, i_D, i_sigma]
-                K_prime = (1.0 - derived.delta_semester) * K + I_opt
+                K_prime = (1.0 - derived.delta_annual) * K + I_opt
 
                 for i_state_half in 1:n_states
                     i_D_half, i_sigma_half = get_D_sigma_indices(grids, i_state_half)
@@ -408,7 +407,7 @@ function record_midyear_policy_parallel!(
 
         K = get_K(grids, i_K)
         I_opt = I_policy[i_K, i_D, i_sigma]
-        K_prime = (1.0 - derived.delta_semester) * K + I_opt
+        K_prime = (1.0 - derived.delta_annual) * K + I_opt
 
         for i_state_half in 1:n_states
             i_D_half, i_sigma_half = get_D_sigma_indices(grids, i_state_half)
@@ -458,7 +457,7 @@ function howard_full_step!(
     n_D = grids.n_D
     n_sigma = grids.n_sigma
     n_states = grids.n_states
-    beta = derived.beta_semester
+    beta = params.beta
 
     for i_sigma in 1:n_sigma
         for i_D in 1:n_D
@@ -467,7 +466,7 @@ function howard_full_step!(
             for i_K in 1:n_K
                 K = get_K(grids, i_K)
                 I_opt = I_policy[i_K, i_D, i_sigma]
-                K_prime = (1.0 - derived.delta_semester) * K + I_opt
+                K_prime = (1.0 - derived.delta_annual) * K + I_opt
 
                 pi_first = get_profit(grids, i_K, i_D)
                 cost_I = compute_cost(ac_begin, I_opt, 0.0, K)
@@ -526,7 +525,7 @@ function howard_full_step_parallel!(
     n_D = grids.n_D
     n_sigma = grids.n_sigma
     n_states = grids.n_states
-    beta = derived.beta_semester
+    beta = params.beta
     total_states = n_K * n_D * n_sigma
 
     @threads for idx in 1:total_states
@@ -538,7 +537,7 @@ function howard_full_step_parallel!(
 
         K = get_K(grids, i_K)
         I_opt = I_policy[i_K, i_D, i_sigma]
-        K_prime = (1.0 - derived.delta_semester) * K + I_opt
+        K_prime = (1.0 - derived.delta_annual) * K + I_opt
 
         pi_first = get_profit(grids, i_K, i_D)
         cost_I = compute_cost(ac_begin, I_opt, 0.0, K)

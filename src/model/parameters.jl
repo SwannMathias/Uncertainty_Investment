@@ -115,7 +115,7 @@ These are calculated once and reused throughout the solution.
 struct DerivedParameters
     gamma::Float64               # Profit function demand exponent
     h::Float64               # Profit function scale parameter
-    delta_semester::Float64      # Semester depreciation rate
+    delta_annual::Float64        # Annual depreciation rate (applied once at beginning of year)
     beta_semester::Float64      # Semester discount factor
     K_ss::Float64            # Steady-state capital (no uncertainty)
 end
@@ -128,7 +128,7 @@ Compute derived parameters from primitive parameters.
 # Formulas
 - gamma = (epsilon - 1) / (epsilon - (1 - alpha))
 - h = alpha * (1 - 1/epsilon)^(epsilon/alpha) * (1 - alpha)^(epsilon/alpha - 1)
-- delta_semester = 1 - (1 - delta)^(1/2)
+- delta_annual = delta (applied once at beginning of year, no semester conversion)
 - beta_semester = beta^(1/2)
 - K_ss computed from first-order condition: MPK = delta/beta
 """
@@ -142,8 +142,8 @@ function get_derived_parameters(p::ModelParameters)
     term3 = (1 - p.alpha)^(p.epsilon / p.alpha - 1)
     h = term1 * term2 * term3
 
-    # Convert annual rates to semester rates
-    delta_semester = 1 - (1 - p.delta)^(1/2)
+    # Annual depreciation rate (applied once at beginning of year)
+    delta_annual = p.delta
     beta_semester = p.beta^(1/2)
 
     # Steady-state capital (deterministic case)
@@ -159,7 +159,7 @@ function get_derived_parameters(p::ModelParameters)
     # K_ss = [h * D_ss^gamma / user_cost]^(1/gamma)
     K_ss = (h * D_ss^gamma / user_cost)^(1/gamma)
 
-    return DerivedParameters(gamma, h, delta_semester, beta_semester, K_ss)
+    return DerivedParameters(gamma, h, delta_annual, beta_semester, K_ss)
 end
 
 """
@@ -223,7 +223,7 @@ function print_parameters(p::ModelParameters)
     println("\nDerived Parameters:")
     println("  gamma (profit exponent)    = $(round(derived.gamma, digits=4))")
     println("  h (scale parameter)    = $(round(derived.h, digits=4))")
-    println("  delta_semester             = $(round(derived.delta_semester, digits=4))")
+    println("  delta_annual               = $(round(derived.delta_annual, digits=4))")
     println("  beta_semester             = $(round(derived.beta_semester, digits=4))")
     println("  K_ss (steady state)    = $(round(derived.K_ss, digits=4))")
 

@@ -366,7 +366,7 @@ function solution_diagnostics(sol::SolvedModel)
         I_rate_std = I_rate_std,
         I_rate_ss = I_rate_ss,
         inaction_frequency = inaction_freq,
-        depreciation_rate = derived.delta_semester,
+        depreciation_rate = derived.delta_annual,
         K_edge_min_share = edge_min_share,
         K_edge_max_share = edge_max_share
     )
