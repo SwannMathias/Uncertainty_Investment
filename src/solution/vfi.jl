@@ -132,6 +132,7 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
     V_new = similar(V)
     I_policy = zeros(grids.n_K, grids.n_D, grids.n_sigma)
     I_policy_old = zeros(grids.n_K, grids.n_D, grids.n_sigma)
+    EV_cache = zeros(grids.n_K, grids.n_states)
 
     # VFI iteration
     iter = 0
@@ -164,11 +165,14 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
     while iter < params.numerical.max_iter
         iter += 1
 
+        # Precompute continuation expectations once per iteration
+        precompute_expectation_cache!(EV_cache, V, grids; horizon=:semester)
+
         # Apply Bellman operator (parallel or serial)
         if use_parallel_actual
-            bellman_operator_parallel!(V_new, V, I_policy, grids, params, ac_begin, ac_mid_year, derived)
+            bellman_operator_parallel!(V_new, V, I_policy, grids, params, ac_begin, ac_mid_year, derived, EV_cache)
         else
-            bellman_operator!(V_new, V, I_policy, grids, params, ac_begin, ac_mid_year, derived)
+            bellman_operator!(V_new, V, I_policy, grids, params, ac_begin, ac_mid_year, derived, EV_cache)
         end
 
         # Check convergence
