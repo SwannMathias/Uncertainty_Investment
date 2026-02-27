@@ -29,6 +29,7 @@ function save_solution(filename::String, sol::SolvedModel)
             ac_begin = sol.ac_begin,
             ac_mid_year = sol.ac_mid_year,
             V = sol.V,
+            V_stage1 = sol.V_stage1,
             I_policy = sol.I_policy,
             Delta_I_policy = sol.Delta_I_policy,
             convergence = sol.convergence)
@@ -62,12 +63,14 @@ function load_solution(filename::String)
         ac_mid_year = data["ac"]
     end
 
+    V_stage1 = haskey(data, "V_stage1") ? data["V_stage1"] : copy(data["V"])
     return SolvedModel(
         data["params"],
         data["grids"],
         ac_begin,
         ac_mid_year,
         data["V"],
+        V_stage1,
         data["I_policy"],
         data["Delta_I_policy"],
         data["convergence"]
