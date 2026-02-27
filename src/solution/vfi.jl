@@ -67,9 +67,10 @@ struct SolvedModel
     grids::StateGrids
     ac_begin::AbstractAdjustmentCost
     ac_mid_year::AbstractAdjustmentCost
-    V::Array{Float64,3}           # V[i_K, i_D, i_sigma]
-    I_policy::Array{Float64,3}    # I[i_K, i_D, i_sigma]
-    Delta_I_policy::Union{Nothing,Array{Float64,5}}  # Delta_I[i_K, i_D, i_sigma, i_D_half, i_sigma_half] (optional)
+    V::Array{Float64,3}           # Beginning-of-year value V0[i_K, i_D, i_sigma]
+    V_stage1::Array{Float64,3}    # Mid-year value V1[i_K, i_D, i_sigma]
+    I_policy::Array{Float64,3}    # Stage-0 policy I[i_K, i_D, i_sigma]
+    Delta_I_policy::Union{Nothing,Array{Float64,3},Array{Float64,5}}  # Stage-1 policy Delta_I
     convergence::NamedTuple
 end
 
@@ -106,37 +107,29 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
                                  ac_mid_year::AbstractAdjustmentCost;
                                  V_init=nothing, verbose=true, use_parallel=true)
     derived = get_derived_parameters(params)
-
-    # Determine if we should use parallel execution
     n_threads = nthreads()
     use_parallel_actual = use_parallel && n_threads > 1
 
-    # Initialize value and policy functions
     if isnothing(V_init)
-        V = zeros(grids.n_K, grids.n_D, grids.n_sigma)
-        # Better initial guess: static profit (using precomputed profits)
-        for i_sigma in 1:grids.n_sigma
-            for i_D in 1:grids.n_D
-                for i_K in 1:grids.n_K
-                    # Approximate value as discounted stream of current profit
-                    # Use precomputed profit for efficiency
-                    pi = get_profit(grids, i_K, i_D)
-                    V[i_K, i_D, i_sigma] = pi / (1 - params.beta)
-                end
-            end
+        V0 = zeros(grids.n_K, grids.n_D, grids.n_sigma)
+        for i_sigma in 1:grids.n_sigma, i_D in 1:grids.n_D, i_K in 1:grids.n_K
+            pi = get_profit(grids, i_K, i_D)
+            V0[i_K, i_D, i_sigma] = pi / (1 - params.beta)
         end
     else
-        V = copy(V_init)
+        V0 = copy(V_init)
     end
 
-    V_new = similar(V)
+    V1 = copy(V0)
+    V0_new = similar(V0)
+    V1_new = similar(V1)
     I_policy = zeros(grids.n_K, grids.n_D, grids.n_sigma)
+    Delta_I_policy = zeros(grids.n_K, grids.n_D, grids.n_sigma)
     I_policy_old = zeros(grids.n_K, grids.n_D, grids.n_sigma)
-    EV_cache = zeros(grids.n_K, grids.n_states)
-    # Mid-year policy: Delta_I_mid_policy[i_K, i_D, i_sigma, i_state_half] = optimal ΔI
-    Delta_I_mid_policy = zeros(grids.n_K, grids.n_D, grids.n_sigma, grids.n_states)
+    Delta_I_old = zeros(grids.n_K, grids.n_D, grids.n_sigma)
+    EV1_to_0 = zeros(grids.n_K, grids.n_states)
+    EV0_to_1 = zeros(grids.n_K, grids.n_states)
 
-    # VFI iteration
     iter = 0
     dist = Inf
     dist_policy = 0.0
@@ -149,16 +142,7 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
         println("Grid size: $(grids.n_K) × $(grids.n_D) × $(grids.n_sigma) = $(grids.n_K * grids.n_D * grids.n_sigma)")
         println("Adjustment cost (begin): $(describe_adjustment_cost(ac_begin))")
         println("Adjustment cost (mid-year): $(describe_adjustment_cost(ac_mid_year))")
-        if use_parallel_actual
-            println("Parallelization: ENABLED ($n_threads threads)")
-        else
-            if use_parallel && n_threads == 1
-                println("Parallelization: DISABLED (only 1 thread available)")
-                println("  Tip: Start Julia with 'julia -t N' for N threads")
-            else
-                println("Parallelization: DISABLED (use_parallel=false)")
-            end
-        end
+        println(use_parallel_actual ? "Parallelization: ENABLED ($n_threads threads)" : "Parallelization: DISABLED")
         println("="^70)
         println(@sprintf("%-8s %-15s %-15s %-15s", "Iter", "V Distance", "Policy Distance", "Time"))
         println("-"^70)
@@ -167,83 +151,49 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
     while iter < params.numerical.max_iter
         iter += 1
 
-        # Precompute continuation expectations once per iteration
-        precompute_expectation_cache!(EV_cache, V, grids; horizon=:semester)
-
-        # Apply Bellman operator (parallel or serial)
         if use_parallel_actual
-            bellman_operator_parallel!(V_new, V, I_policy, grids, params, ac_begin, ac_mid_year, derived, EV_cache)
+            bellman_operator_parallel!(V0_new, V0, I_policy, grids, params, ac_begin, ac_mid_year,
+                                       derived, EV1_to_0, EV0_to_1, V1, V1_new, Delta_I_policy)
         else
-            bellman_operator!(V_new, V, I_policy, grids, params, ac_begin, ac_mid_year, derived, EV_cache)
+            bellman_operator!(V0_new, V0, I_policy, grids, params, ac_begin, ac_mid_year,
+                              derived, EV1_to_0, EV0_to_1, V1, V1_new, Delta_I_policy)
         end
 
-        # Check convergence
-        dist = maximum(abs.(V_new .- V))
-
-        # Compare with previous policy
+        dist = max(maximum(abs.(V0_new .- V0)), maximum(abs.(V1_new .- V1)))
         if iter > 1
-            dist_policy = maximum(abs.(I_policy .- I_policy_old))
+            dist_policy = max(maximum(abs.(I_policy .- I_policy_old)),
+                              maximum(abs.(Delta_I_policy .- Delta_I_old)))
         end
 
-        # Store current policy for next iteration
         I_policy_old .= I_policy
+        Delta_I_old .= Delta_I_policy
 
-        # Print progress
         if verbose && (iter % 10 == 0 || iter == 1)
             elapsed = time() - start_time
             println(@sprintf("%-8d %-15.2e %-15.2e %-15.2f", iter, dist, dist_policy, elapsed))
         end
 
-        # Check convergence
         if dist < params.numerical.tol_vfi && dist_policy < params.numerical.tol_policy
-            if verbose
-                elapsed = time() - start_time
-                println("-"^70)
-                println("✓ Converged in $iter iterations ($(format_time(elapsed)))")
-                println("  Final distance: $(dist)")
-                println("  Policy distance: $(dist_policy)")
-                if use_parallel_actual
-                    println("  Threads used: $n_threads")
-                end
-                println("="^70)
-            end
+            verbose && println("✓ Converged in $iter iterations")
             break
         end
 
-        # Record mid-year policy and run full Howard steps (every iteration)
-        if params.numerical.howard_steps > 0
-            # Record optimal ΔI for every state and mid-year realization under current I_policy and V_new
-            precompute_expectation_cache!(EV_cache, V_new, grids; horizon=:semester)
+        V0 .= V0_new
+        V1 .= V1_new
+
+        if params.numerical.howard_steps > 0 && iter % 20 == 0
             if use_parallel_actual
-                record_midyear_policy_parallel!(Delta_I_mid_policy, I_policy, V_new,
-                                                grids, params, ac_mid_year, derived, EV_cache)
+                howard_improvement_step_parallel!(V0, V1, I_policy, Delta_I_policy, grids, params,
+                                                  ac_begin, ac_mid_year, derived,
+                                                  params.numerical.howard_steps)
             else
-                record_midyear_policy!(Delta_I_mid_policy, I_policy, V_new,
-                                       grids, params, ac_mid_year, derived, EV_cache)
+                howard_improvement_step!(V0, V1, I_policy, Delta_I_policy, grids, params,
+                                         ac_begin, ac_mid_year, derived,
+                                         params.numerical.howard_steps)
             end
-
-            # Run cheap full Howard steps: lookup + interpolation only, no optimizers
-            for m in 1:params.numerical.howard_steps
-                precompute_expectation_cache!(EV_cache, V_new, grids; horizon=:semester)
-                if use_parallel_actual
-                    howard_full_step_parallel!(V_new, I_policy, Delta_I_mid_policy,
-                                               grids, params, ac_begin, ac_mid_year, derived, EV_cache)
-                else
-                    howard_full_step!(V_new, I_policy, Delta_I_mid_policy,
-                                      grids, params, ac_begin, ac_mid_year, derived, EV_cache)
-                end
-            end
-        end
-
-        # Update value function
-        V .= V_new
-
-        if iter == params.numerical.max_iter
-            @warn "VFI did not converge after $iter iterations. Distance: $dist"
         end
     end
 
-    # Convergence information
     convergence = (
         converged = (dist < params.numerical.tol_vfi),
         iterations = iter,
@@ -253,7 +203,7 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
         threads_used = use_parallel_actual ? n_threads : 1
     )
 
-    return SolvedModel(params, grids, ac_begin, ac_mid_year, V, I_policy, nothing, convergence)
+    return SolvedModel(params, grids, ac_begin, ac_mid_year, V0, V1, I_policy, Delta_I_policy, convergence)
 end
 
 """
