@@ -122,15 +122,16 @@ function simulate_firm(sol::SolvedModel, D_path::Vector{Float64}, sigma_path::Ve
         i_D_half = argmin(abs.(grids.sv.D_grid .- log_D_half))
         i_sigma_half = argmin(abs.(grids.sv.sigma_grid .- log_sigma_half))
 
-        # Find nearest K grid index for precomputed profit lookup
-        i_K = argmin(abs.(grids.K_grid .- K_current))
-
-        # Solve mid-year problem for investment revision
-        # This requires solving the optimization problem
-        Delta_I_opt, _ = solve_midyear_problem(
-            K_prime, i_D_half, i_sigma_half, i_K, K_current, I,
-            sol.V, grids, sol.params, sol.ac_mid_year, derived, EV_cache
-        )
+        # Stage-1 policy is now solved directly in VFI; interpolate it at (K_prime, D_half, sigma_half)
+        if !isnothing(sol.Delta_I_policy) && ndims(sol.Delta_I_policy) == 3
+            Delta_I_opt = interpolate_policy(grids, sol.Delta_I_policy, K_prime, i_D_half, i_sigma_half)
+        else
+            i_K = argmin(abs.(grids.K_grid .- K_current))
+            Delta_I_opt, _ = solve_midyear_problem(
+                K_prime, i_D_half, i_sigma_half, i_K, K_current, I,
+                sol.V, grids, sol.params, sol.ac_mid_year, derived, EV_cache
+            )
+        end
         Delta_I[year] = Delta_I_opt
 
         # Total investment

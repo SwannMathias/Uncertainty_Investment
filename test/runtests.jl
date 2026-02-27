@@ -203,4 +203,7 @@ include("test_parallelization.jl")
 # Include separate adjustment cost tests
 include("test_separate_costs.jl")
 
+# Two-stage DP refactor validation
+include("test_two_stage_refactor.jl")
+
 println("\n All tests passed!")
