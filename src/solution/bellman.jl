@@ -44,16 +44,43 @@ where K'' = K_prime + Delta_I.
 # Performance
 Uses precomputed profits via get_profit(grids, i_K, i_D_half) for O(1) lookup.
 """
+@inline function precompute_expectation_cache!(
+    EV_cache::AbstractMatrix{Float64},
+    V::Array{Float64,3},
+    grids::StateGrids;
+    horizon::Symbol=:semester
+)
+    @assert horizon in [:semester, :year] "horizon must be :semester or :year"
+    Pi = horizon == :semester ? grids.Pi_semester : grids.Pi_year
+
+    # Reshape V[K, D, sigma] -> V[K, joint_state] without allocation.
+    V_mat = reshape(V, grids.n_K, grids.n_states)
+
+    # EV_cache[K, state] = E[V(K, state') | state]
+    mul!(EV_cache, V_mat, transpose(Pi))
+    return nothing
+end
+
+"""
+    precompute_expectation_cache!(EV_cache, V, grids; horizon=:semester) -> Nothing
+
+Precompute E[V(K, D', sigma') | D, sigma] for all capital levels and all
+current stochastic states using matrix multiplication.
+
+This is an allocation-free hot-path helper used by Bellman updates.
+"""
 function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::Int,
                                i_K::Int, K_current::Float64, I_initial::Float64,
                                V::Array{Float64,3}, grids::StateGrids,
                                params::ModelParameters, ac_mid_year::AbstractAdjustmentCost,
-                               derived::DerivedParameters)
+                               derived::DerivedParameters,
+                               EV_cache::AbstractMatrix{Float64})
     # Mid-year profit (operating on current capital) - use precomputed value
     pi_half = get_profit(grids, i_K, i_D_half)
 
-    # Expected value over next year's states
-    EV = compute_expectation(grids, V, i_D_half, i_sigma_half; horizon=:semester)
+    # Expected value over next year's states (precomputed cache)
+    i_state_half = get_joint_state_index(grids, i_D_half, i_sigma_half)
+    EV = @view EV_cache[:, i_state_half]
 
     # Objective function: maximize over Delta_I
     function obj_Delta_I(Delta_I)
@@ -91,8 +118,7 @@ function solve_midyear_problem(K_prime::Float64, i_D_half::Int, i_sigma_half::In
         # FOC: beta * ∂EV/∂K = 0 => Choose K'' to maximize EV
         # This is equivalent to choosing Delta_I to maximize EV(K'')
         # Use simple grid search
-        EV_on_grid = derived.beta_semester .* EV
-        i_K_opt = argmax(EV_on_grid)
+        i_K_opt = argmax(EV)
         K_opt = grids.K_grid[i_K_opt]
         Delta_I_opt = K_opt - K_prime
 
@@ -151,7 +177,8 @@ function compute_midyear_continuation(K_prime::Float64, i_D::Int, i_sigma::Int,
                                       i_K::Int, K_current::Float64, I_initial::Float64,
                                       V::Array{Float64,3}, grids::StateGrids,
                                       params::ModelParameters, ac_mid_year::AbstractAdjustmentCost,
-                                      derived::DerivedParameters)
+                                      derived::DerivedParameters,
+                                      EV_cache::AbstractMatrix{Float64})
     # Get transition probability from (D, sigma) to (D_half, sigma_half)
     i_state = get_joint_state_index(grids, i_D, i_sigma)
 
@@ -164,7 +191,7 @@ function compute_midyear_continuation(K_prime::Float64, i_D::Int, i_sigma::Int,
         # Solve mid-year problem for this realization (using precomputed profits)
         Delta_I_opt, value_half = solve_midyear_problem(
             K_prime, i_D_half, i_sigma_half, i_K, K_current, I_initial,
-            V, grids, params, ac_mid_year, derived
+            V, grids, params, ac_mid_year, derived, EV_cache
         )
 
         # Weight by probability
@@ -201,12 +228,22 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
                                       params::ModelParameters,
                                       ac_begin::AbstractAdjustmentCost,
                                       ac_mid_year::AbstractAdjustmentCost,
-                                      derived::DerivedParameters)
+                                      derived::DerivedParameters,
+                                      EV_cache::AbstractMatrix{Float64})
     # Current state
     K = get_K(grids, i_K)
 
     # First-semester profit - use precomputed value
     pi_first = get_profit(grids, i_K, i_D)
+
+    # Precompute W(K', D, sigma) on the K grid once for this state.
+    W_grid = zeros(grids.n_K)
+    for i_K_prime in 1:grids.n_K
+        W_grid[i_K_prime] = compute_midyear_continuation(
+            grids.K_grid[i_K_prime], i_D, i_sigma, i_K, K, 0.0, V, grids, params,
+            ac_mid_year, derived, EV_cache
+        )
+    end
 
     # Objective function: maximize over I
     function obj_I(I)
@@ -223,10 +260,8 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
         # Beginning-of-year adjustment cost: cost on I only
         cost = compute_cost(ac_begin, I, 0.0, K)
 
-        # Continuation value (pass i_K for precomputed profit access)
-        W_value = compute_midyear_continuation(
-            K_prime, i_D, i_sigma, i_K, K, I, V, grids, params, ac_mid_year, derived
-        )
+        # Continuation value from cached W grid (interpolate in K')
+        W_value = linear_interp_1d(grids.K_grid, W_grid, K_prime)
 
         return -cost + W_value
     end
@@ -241,8 +276,12 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
 
     # Optimize
     if ac_begin isa NoAdjustmentCost && !has_fixed_cost(ac_begin)
-        # Can use coarser search for faster convergence
-        I_opt, val = maximize_univariate(obj_I, I_min, I_max; method=:brent, tol=1e-5)
+        # No cost case: solve directly on grid then map back to investment.
+        i_K_prime_opt = argmax(W_grid)
+        K_prime_opt = grids.K_grid[i_K_prime_opt]
+        I_opt = K_prime_opt - (1 - derived.delta_semester) * K
+        I_opt = clamp(I_opt, I_min, I_max)
+        val = obj_I(I_opt)
     elseif has_fixed_cost(ac_begin)
         # Discrete choice
         value_no_invest = pi_first + obj_I(0.0)
@@ -293,13 +332,14 @@ function bellman_operator!(V_new::Array{Float64,3}, V::Array{Float64,3},
                           params::ModelParameters,
                           ac_begin::AbstractAdjustmentCost,
                           ac_mid_year::AbstractAdjustmentCost,
-                          derived::DerivedParameters)
+                          derived::DerivedParameters,
+                          EV_cache::AbstractMatrix{Float64})
     # Loop over all states
     for i_sigma in 1:grids.n_sigma
         for i_D in 1:grids.n_D
             for i_K in 1:grids.n_K
                 I_opt, V_value = solve_beginning_year_problem(
-                    i_K, i_D, i_sigma, V, grids, params, ac_begin, ac_mid_year, derived
+                    i_K, i_D, i_sigma, V, grids, params, ac_begin, ac_mid_year, derived, EV_cache
                 )
 
                 V_new[i_K, i_D, i_sigma] = V_value
@@ -335,8 +375,10 @@ function howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3
                                  derived::DerivedParameters,
                                  n_steps::Int)
     V_temp = copy(V)
+    EV_cache = zeros(grids.n_K, grids.n_states)
 
     for step in 1:n_steps
+        precompute_expectation_cache!(EV_cache, V_temp, grids; horizon=:semester)
         for i_sigma in 1:grids.n_sigma
             for i_D in 1:grids.n_D
                 for i_K in 1:grids.n_K
@@ -356,7 +398,7 @@ function howard_improvement_step!(V::Array{Float64,3}, I_policy::Array{Float64,3
 
                     # Mid-year continuation (using current V, pass i_K for precomputed profits)
                     W_val = compute_midyear_continuation(
-                        K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac_mid_year, derived
+                        K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac_mid_year, derived, EV_cache
                     )
 
                     # Update value
@@ -406,7 +448,8 @@ function bellman_operator_parallel!(V_new::Array{Float64,3}, V::Array{Float64,3}
                                     params::ModelParameters,
                                     ac_begin::AbstractAdjustmentCost,
                                     ac_mid_year::AbstractAdjustmentCost,
-                                    derived::DerivedParameters)
+                                    derived::DerivedParameters,
+                                    EV_cache::AbstractMatrix{Float64})
     n_K = grids.n_K
     n_D = grids.n_D
     n_sigma = grids.n_sigma
@@ -424,7 +467,7 @@ function bellman_operator_parallel!(V_new::Array{Float64,3}, V::Array{Float64,3}
 
         # Solve optimization for this state
         I_opt, V_value = solve_beginning_year_problem(
-            i_K, i_D, i_sigma, V, grids, params, ac_begin, ac_mid_year, derived
+            i_K, i_D, i_sigma, V, grids, params, ac_begin, ac_mid_year, derived, EV_cache
         )
 
         # Store results (no race condition - each idx writes to unique location)
@@ -465,8 +508,10 @@ function howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{
     n_total = n_K * n_D * n_sigma
 
     V_temp = copy(V)
+    EV_cache = zeros(grids.n_K, grids.n_states)
 
     for step in 1:n_steps
+        precompute_expectation_cache!(EV_cache, V_temp, grids; horizon=:semester)
         # Parallelize over flattened state space
         @threads for idx in 1:n_total
             # Convert linear index to 3D indices
@@ -491,7 +536,7 @@ function howard_improvement_step_parallel!(V::Array{Float64,3}, I_policy::Array{
 
             # Mid-year continuation (using V_temp which is read-only this step, pass i_K for precomputed profits)
             W_val = compute_midyear_continuation(
-                K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac_mid_year, derived
+                K_prime, i_D, i_sigma, i_K, K, I, V_temp, grids, params, ac_mid_year, derived, EV_cache
             )
 
             # Update value (no race condition)
