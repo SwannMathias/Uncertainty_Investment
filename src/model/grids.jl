@@ -138,6 +138,10 @@ function construct_grids(params::ModelParameters)
     K_grid_log = range(log(K_min), log(K_max), length=n_K)
     K_grid = exp.(K_grid_log)
 
+    # Validate K_grid for interpolation (checked once here, not in hot-path linear_interp_1d)
+    @assert issorted(K_grid) "Capital grid must be sorted"
+    @assert length(K_grid) == n_K "Capital grid length mismatch"
+
     # 2. Discretize stochastic processes
     sv = discretize_sv_process(params.demand, params.volatility,
                                params.numerical.n_D, params.numerical.n_sigma)
@@ -216,9 +220,8 @@ get_joint_state_index(grids::StateGrids, i_D::Int, i_sigma::Int) = (i_sigma - 1)
 Convert joint state index to (i_D, i_sigma) indices.
 """
 function get_D_sigma_indices(grids::StateGrids, i_state::Int)
-    i_sigma = div(i_state - 1, grids.n_D) + 1
-    i_D = mod(i_state - 1, grids.n_D) + 1
-    return i_D, i_sigma
+    q, r = divrem(i_state - 1, grids.n_D)
+    return r + 1, q + 1  # (i_D, i_sigma)
 end
 
 # =============================================================================

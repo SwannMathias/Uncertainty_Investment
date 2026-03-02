@@ -65,6 +65,7 @@ export AbstractAdjustmentCost
 export NoAdjustmentCost, ConvexAdjustmentCost
 export FixedAdjustmentCost
 export CompositeAdjustmentCost
+export ConvexCrossStageAdjustmentCost
 export compute_cost, marginal_cost_I, marginal_cost_Delta_I
 export has_fixed_cost, is_differentiable, describe_adjustment_cost
 export total_adjustment_cost

@@ -31,19 +31,44 @@ end
     return x_opt, v_opt
 end
 
-function _maximize_with_inaction(obj, lower::Float64, upper::Float64)
-    v0 = obj(0.0)
-    x_best, v_best = 0.0, v0
+"""
+    _maximize_with_inaction(obj, lower, upper) -> (x_best, v_best)
 
-    if lower < -1e-10
-        x_neg, v_neg = _best_adjustment_choice(obj, lower, min(-1e-10, upper))
+Maximize `obj(x)` on `[lower, upper]`, comparing three candidates:
+  1. Inaction:   x = 0  (always evaluated if feasible)
+  2. Negative:   best x in [lower, -tol]
+  3. Positive:   best x in [+tol, upper]
+
+The dead zone `(-tol, +tol)` around zero is intentional: with fixed adjustment
+costs, any investment smaller than `tol` is treated as inaction. The threshold
+`tol` is set to 1e-6 to match the default `FixedAdjustmentCost.threshold`.
+
+Returns the (x, value) pair with the highest objective value.
+"""
+function _maximize_with_inaction(obj, lower::Float64, upper::Float64)
+    # Inaction threshold — must match FixedAdjustmentCost.threshold for consistency
+    tol = 1e-6
+
+    # Start with inaction as the default candidate (only if 0 is feasible)
+    if lower <= 0.0 <= upper
+        v0 = obj(0.0)
+        x_best, v_best = 0.0, v0
+    else
+        # 0 is infeasible; initialise with -Inf so any feasible candidate wins
+        x_best, v_best = 0.0, -Inf
+    end
+
+    # Search negative branch [lower, -tol] (disinvestment)
+    if lower < -tol
+        x_neg, v_neg = _best_adjustment_choice(obj, lower, min(-tol, upper))
         if v_neg > v_best
             x_best, v_best = x_neg, v_neg
         end
     end
 
-    if upper > 1e-10
-        x_pos, v_pos = _best_adjustment_choice(obj, max(1e-10, lower), upper)
+    # Search positive branch [+tol, upper] (investment)
+    if upper > tol
+        x_pos, v_pos = _best_adjustment_choice(obj, max(tol, lower), upper)
         if v_pos > v_best
             x_best, v_best = x_pos, v_pos
         end
@@ -72,7 +97,7 @@ function solve_midyear_problem(K_stage1::Float64, i_D::Int, i_sigma::Int,
             return -1e10
         end
         cost = compute_cost(ac_mid_year, 0.0, Delta_I, K_current)
-        return -cost + params.beta * linear_interp_1d(grids.K_grid, EV, K_next)
+        return -cost + derived.beta_semester * linear_interp_1d(grids.K_grid, EV, K_next)
     end
 
     Delta_I_min = max(grids.K_min - K_dep, -K_dep + 1e-6)
@@ -129,7 +154,7 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
             return -1e10
         end
         cost = compute_cost(ac_begin, I, 0.0, K)
-        return pi_first - cost + expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1)
+        return pi_first - cost + derived.beta_semester * (expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1))
     end
 
     I_min = max(grids.K_min - (1 - derived.delta_semester) * K,
@@ -222,12 +247,16 @@ function howard_improvement_step!(V0::Array{Float64,3}, V1::Array{Float64,3},
         precompute_expectation_cache!(EV1_to_0, V0, grids; horizon=:semester)
         for i_sigma in 1:grids.n_sigma, i_D in 1:grids.n_D, i_K in 1:grids.n_K
             K = get_K(grids, i_K)
+            I_opt = I_policy[i_K, i_D, i_sigma]
             ΔI = Delta_I_policy[i_K, i_D, i_sigma]
             i_state = get_joint_state_index(grids, i_D, i_sigma)
             EV = @view EV1_to_0[:, i_state]
-            K_next = (1 - derived.delta_semester) * K + ΔI
+            # Mid-year: firm knows K and I from beginning of year
+            # K_stage1 = (1-delta_semester)*K + I, then K_next = (1-delta_semester)*K_stage1 + ΔI
+            K_stage1 = (1 - derived.delta_semester) * K + I_opt
+            K_next = (1 - derived.delta_semester) * K_stage1 + ΔI
             V1[i_K, i_D, i_sigma] = -compute_cost(ac_mid_year, 0.0, ΔI, K) +
-                                    params.beta * linear_interp_1d(grids.K_grid, EV, K_next)
+                                    derived.beta_semester * linear_interp_1d(grids.K_grid, EV, K_next)
         end
 
         precompute_expectation_cache!(EV0_to_1, V1, grids; horizon=:semester)
@@ -245,7 +274,7 @@ function howard_improvement_step!(V0::Array{Float64,3}, V1::Array{Float64,3},
                 expected_pi_mid += probs_mid[i_state_half] * get_profit(grids, i_K, i_D_half)
             end
             V0[i_K, i_D, i_sigma] = get_profit(grids, i_K, i_D) - compute_cost(ac_begin, I, 0.0, K) +
-                                    expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1)
+                                    derived.beta_semester * (expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1))
         end
     end
     return nothing
@@ -263,7 +292,7 @@ function bellman_operator_parallel!(V0_new::Array{Float64,3}, V0::Array{Float64,
                                     Delta_I_policy::Array{Float64,3})
     precompute_expectation_cache!(EV1_to_0, V0, grids; horizon=:semester)
     n_total = grids.n_K * grids.n_D * grids.n_sigma
-    @threads for idx in 1:n_total
+    @threads :dynamic for idx in 1:n_total
         i_K = ((idx - 1) % grids.n_K) + 1
         temp = (idx - 1) ÷ grids.n_K
         i_D = (temp % grids.n_D) + 1
@@ -276,7 +305,7 @@ function bellman_operator_parallel!(V0_new::Array{Float64,3}, V0::Array{Float64,
     end
 
     precompute_expectation_cache!(EV0_to_1, V1_new, grids; horizon=:semester)
-    @threads for idx in 1:n_total
+    @threads :dynamic for idx in 1:n_total
         i_K = ((idx - 1) % grids.n_K) + 1
         temp = (idx - 1) ÷ grids.n_K
         i_D = (temp % grids.n_D) + 1
@@ -313,8 +342,55 @@ function howard_improvement_step_parallel!(V0::Array{Float64,3}, V1::Array{Float
                                            ac_mid_year::AbstractAdjustmentCost,
                                            derived::DerivedParameters,
                                            n_steps::Int)
-    howard_improvement_step!(V0, V1, I_policy, Delta_I_policy,
-                             grids, params, ac_begin, ac_mid_year, derived, n_steps)
+    EV1_to_0 = zeros(grids.n_K, grids.n_states)
+    EV0_to_1 = zeros(grids.n_K, grids.n_states)
+    n_total = grids.n_K * grids.n_D * grids.n_sigma
+
+    for _ in 1:n_steps
+        # Stage 1 update (mid-year)
+        precompute_expectation_cache!(EV1_to_0, V0, grids; horizon=:semester)
+        @threads :dynamic for idx in 1:n_total
+            i_K = ((idx - 1) % grids.n_K) + 1
+            temp = (idx - 1) ÷ grids.n_K
+            i_D = (temp % grids.n_D) + 1
+            i_sigma = (temp ÷ grids.n_D) + 1
+
+            K = get_K(grids, i_K)
+            I_opt = I_policy[i_K, i_D, i_sigma]
+            ΔI = Delta_I_policy[i_K, i_D, i_sigma]
+            i_state = get_joint_state_index(grids, i_D, i_sigma)
+            EV = @view EV1_to_0[:, i_state]
+            K_stage1 = (1 - derived.delta_semester) * K + I_opt
+            K_next = (1 - derived.delta_semester) * K_stage1 + ΔI
+            V1[i_K, i_D, i_sigma] = -compute_cost(ac_mid_year, 0.0, ΔI, K) +
+                                    derived.beta_semester * linear_interp_1d(grids.K_grid, EV, K_next)
+        end
+
+        # Stage 0 update (beginning of year)
+        precompute_expectation_cache!(EV0_to_1, V1, grids; horizon=:semester)
+        @threads :dynamic for idx in 1:n_total
+            i_K = ((idx - 1) % grids.n_K) + 1
+            temp = (idx - 1) ÷ grids.n_K
+            i_D = (temp % grids.n_D) + 1
+            i_sigma = (temp ÷ grids.n_D) + 1
+
+            K = get_K(grids, i_K)
+            I = I_policy[i_K, i_D, i_sigma]
+            i_state = get_joint_state_index(grids, i_D, i_sigma)
+            EV = @view EV0_to_1[:, i_state]
+            K_stage1 = (1 - derived.delta_semester) * K + I
+            # Expected mid-year profit E[π(K, D_half) | D, σ]
+            probs_mid = @view grids.Pi_semester[i_state, :]
+            expected_pi_mid = 0.0
+            for i_state_half in 1:grids.n_states
+                i_D_half, _ = get_D_sigma_indices(grids, i_state_half)
+                expected_pi_mid += probs_mid[i_state_half] * get_profit(grids, i_K, i_D_half)
+            end
+            V0[i_K, i_D, i_sigma] = get_profit(grids, i_K, i_D) - compute_cost(ac_begin, I, 0.0, K) +
+                                    derived.beta_semester * (expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1))
+        end
+    end
+    return nothing
 end
 
 # ============================================================================
@@ -399,7 +475,7 @@ function record_midyear_policy_parallel!(
     n_states = grids.n_states
     total_states = n_K * n_D * n_sigma
 
-    @threads for idx in 1:total_states
+    @threads :dynamic for idx in 1:total_states
         # Convert linear index to 3D indices (column-major, matches bellman_operator_parallel!)
         i_K = ((idx - 1) % n_K) + 1
         temp = (idx - 1) ÷ n_K
@@ -496,7 +572,7 @@ function howard_full_step!(
                     W_value += prob * value_half
                 end
 
-                V[i_K, i_D, i_sigma] = pi_first - cost_I + W_value
+                V[i_K, i_D, i_sigma] = pi_first - cost_I + beta * W_value
             end
         end
     end
@@ -529,7 +605,7 @@ function howard_full_step_parallel!(
     beta = derived.beta_semester
     total_states = n_K * n_D * n_sigma
 
-    @threads for idx in 1:total_states
+    @threads :dynamic for idx in 1:total_states
         # Convert linear index to 3D indices (column-major, matches bellman_operator_parallel!)
         i_K = ((idx - 1) % n_K) + 1
         temp = (idx - 1) ÷ n_K
@@ -567,7 +643,7 @@ function howard_full_step_parallel!(
             W_value += prob * value_half
         end
 
-        V[i_K, i_D, i_sigma] = pi_first - cost_I + W_value
+        V[i_K, i_D, i_sigma] = pi_first - cost_I + beta * W_value
     end
     return nothing
 end
