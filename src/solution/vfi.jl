@@ -173,8 +173,9 @@ function value_function_iteration(grids::StateGrids, params::ModelParameters,
             println(@sprintf("%-8d %-15.2e %-15.2e %-15.2f", iter, dist, dist_policy, elapsed))
         end
 
-        if dist < params.numerical.tol_vfi && dist_policy < params.numerical.tol_policy
-            verbose && println("✓ Converged in $iter iterations")
+        # Convergence based on value function distance only (policy may oscillate near kinks)
+        if dist < params.numerical.tol_vfi
+            verbose && println("✓ Converged in $iter iterations (V dist: $(@sprintf("%.2e", dist)), policy dist: $(@sprintf("%.2e", dist_policy)))")
             break
         end
 

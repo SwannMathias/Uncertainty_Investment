@@ -20,9 +20,9 @@ Simple linear interpolation for 1D functions.
 - Interpolated value at x
 """
 function linear_interp_1d(x_grid::Vector{Float64}, y_vals::AbstractVector{Float64}, x::Float64)
+    # NOTE: Grid validity (sorted, matching length) is checked at grid construction time
+    # in construct_grids(). Assertions were removed from this hot path for performance.
     n = length(x_grid)
-    @assert length(y_vals) == n "Grid and values must have same length"
-    @assert issorted(x_grid) "Grid must be sorted"
 
     # Handle boundary cases
     if x <= x_grid[1]

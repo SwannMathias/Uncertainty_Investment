@@ -181,6 +181,66 @@ function is_differentiable(ac::CompositeAdjustmentCost)
 end
 
 # =============================================================================
+# 5. Convex Adjustment Cost with Cross-Stage Dependency
+# =============================================================================
+
+"""
+    ConvexCrossStageAdjustmentCost
+
+Convex adjustment cost where the mid-year cost depends on both ΔI and the
+beginning-of-year investment I (passed via the `I` argument).
+
+At beginning of year (stage 0, called with Delta_I=0):
+    C(I, 0, K) = (phi_begin/2) * (I/K)^2 * K
+
+At mid-year (stage 1, called with I=0, but I_begin passed separately):
+    C(0, ΔI, K) = (phi_mid/2) * (ΔI/K)^2 * K + phi_cross * |I_begin * ΔI| / K
+
+The cross term `phi_cross * |I_begin * ΔI| / K` penalises mid-year revisions
+that are large relative to the initial investment, capturing the idea that
+revising a large initial commitment is costly.
+
+To use the cross term, the caller must pass `I_begin` via the `I` argument
+at mid-year instead of 0. See the Bellman operator for the calling convention.
+"""
+@with_kw struct ConvexCrossStageAdjustmentCost <: AbstractAdjustmentCost
+    phi_begin::Float64 = 1.0    # Convex cost parameter for beginning-of-year
+    phi_mid::Float64 = 1.0      # Convex cost parameter for mid-year ΔI
+    phi_cross::Float64 = 0.0    # Cross-term coupling I and ΔI
+
+    function ConvexCrossStageAdjustmentCost(phi_begin, phi_mid, phi_cross)
+        @assert phi_begin >= 0.0 "phi_begin must be non-negative"
+        @assert phi_mid >= 0.0 "phi_mid must be non-negative"
+        @assert phi_cross >= 0.0 "phi_cross must be non-negative"
+        new(phi_begin, phi_mid, phi_cross)
+    end
+end
+
+function compute_cost(ac::ConvexCrossStageAdjustmentCost, I, Delta_I, K)
+    # Stage 0 cost: convex in I
+    cost_begin = 0.5 * ac.phi_begin * (I / K)^2 * K
+    # Stage 1 cost: convex in ΔI + cross-term coupling I and ΔI
+    cost_mid = 0.5 * ac.phi_mid * (Delta_I / K)^2 * K
+    cost_cross = ac.phi_cross * abs(I * Delta_I) / K
+    return cost_begin + cost_mid + cost_cross
+end
+
+function marginal_cost_I(ac::ConvexCrossStageAdjustmentCost, I, Delta_I, K)
+    mc_begin = ac.phi_begin * (I / K)
+    mc_cross = ac.phi_cross * abs(Delta_I) * sign(I) / K
+    return mc_begin + mc_cross
+end
+
+function marginal_cost_Delta_I(ac::ConvexCrossStageAdjustmentCost, I, Delta_I, K)
+    mc_mid = ac.phi_mid * (Delta_I / K)
+    mc_cross = ac.phi_cross * abs(I) * sign(Delta_I) / K
+    return mc_mid + mc_cross
+end
+
+has_fixed_cost(::ConvexCrossStageAdjustmentCost) = false
+is_differentiable(::ConvexCrossStageAdjustmentCost) = true
+
+# =============================================================================
 # Utility functions
 # =============================================================================
 
@@ -196,6 +256,8 @@ function describe_adjustment_cost(ac::AbstractAdjustmentCost)
         return "Convex: ($(ac.phi)/2) * (I_total/K)²"
     elseif ac isa FixedAdjustmentCost
         return "Fixed cost: F=$(ac.F)"
+    elseif ac isa ConvexCrossStageAdjustmentCost
+        return "ConvexCrossStage: phi_begin=$(ac.phi_begin), phi_mid=$(ac.phi_mid), phi_cross=$(ac.phi_cross)"
     elseif ac isa CompositeAdjustmentCost
         desc = "Composite: " * join([describe_adjustment_cost(c) for c in ac.components], " + ")
         return desc

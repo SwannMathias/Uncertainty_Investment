@@ -43,13 +43,16 @@ Year t
 - Demand: log Dₛ₊₁/₂ = μ_D(1-ρ_D) + ρ_D log Dₛ + σₛ εₛ₊₁/₂
 - Volatility: log σₛ₊₁/₂ = σ̄(1-ρ_σ) + ρ_σ log σₛ + σ_η ηₛ₊₁/₂
 
-**Adjustment Costs (flexible menu)**
-- None
-- Convex: (φ/2)(I_total/K)²K
-- Fixed: F·𝟙{I_total ≠ 0}
+**Adjustment Costs (implemented)**
+- None (`NoAdjustmentCost`)
+- Convex: (φ/2)(I_total/K)²K (`ConvexAdjustmentCost`)
+- Fixed: F·𝟙{I_total ≠ 0} (`FixedAdjustmentCost`)
+- Convex with cross-stage dependency: φ_begin, φ_mid, φ_cross (`ConvexCrossStageAdjustmentCost`)
+- Composite: combinations of above (`CompositeAdjustmentCost`)
+
+**Adjustment Costs (not yet implemented)**
 - Asymmetric: φ₊(I₊)²/K + φ₋(I₋)²/K
 - Partial irreversibility: -(1-p_S)max(-I_total, 0)
-- Composite: combinations of above
 
 ## Computational Implementation
 
@@ -416,6 +419,81 @@ julia -t 8 --project=. -e 'using Pkg; Pkg.test()'
 ```bash
 julia -t 8 scripts/benchmark_multiscale.jl
 ```
+
+## Known Limitations and Potential Issues
+
+The following issues have been identified via code audit and are documented here for
+awareness. They do not currently affect correctness for standard use cases but may
+require attention in specific scenarios.
+
+### NUM-1: SV discretization averages demand grids across volatility states
+
+`src/model/stochastic_process.jl` uses `D_grid = mean(D_grids)` — a single averaged
+demand grid rather than volatility-specific grids. When `sigma_eta` is large, the
+demand grids for different sigma levels can differ substantially. The averaged grid
+may misrepresent the distribution for extreme volatility states.
+
+**Workaround:** Keep `sigma_eta` moderate or verify moment matching with
+`verify_discretization()`.
+
+### NUM-3: Flat extrapolation at grid boundaries
+
+`linear_interp_1d` and `get_profit_at_K` use constant extrapolation outside
+`[K_min, K_max]`. If the optimal policy pushes capital outside the grid, the value
+function is artificially flat. Check `K_edge_min_share` / `K_edge_max_share` in
+`solution_diagnostics()` — if these exceed a few percent, widen the grid.
+
+### NUM-4: Golden section tolerance equals VFI tolerance
+
+The inner optimizer uses `tol=1e-6` (hardcoded), matching the default VFI tolerance.
+The optimizer's approximation error may prevent convergence below `1e-6`. If tighter
+convergence is needed, modify `_best_adjustment_choice` in `bellman.jl` to use a
+smaller tolerance (e.g., `1e-8`).
+
+### NUM-5: `compute_expectation` allocates per call
+
+`compute_expectation` in `grids.jl` allocates a new `zeros(n_K)` vector each call.
+This is not used in the VFI hot path (which uses cached matrix multiplication), but
+be mindful in tight loops.
+
+### NUM-6: Reproducibility across Julia versions
+
+The code uses `MersenneTwister` explicitly for parallel shock generation (version-stable),
+but serial paths may use `Random.GLOBAL_RNG`, which changed between Julia 1.6 (MT)
+and 1.7+ (Xoshiro). For exact reproducibility across Julia versions, always pass an
+explicit `MersenneTwister` RNG.
+
+### PERF-1: Dense matrix multiplication for expectations
+
+`precompute_expectation_cache!` uses dense `mul!` for `EV = V * Pi'`. This is efficient
+for current grid sizes (n_states ~ 105) but scales as O(n_K × n_states²). For very
+fine grids (n_states > 500), consider sparse storage for `Pi_joint`.
+
+### ECON-5: Convex cost interface uses I_total = I + ΔI
+
+The `ConvexAdjustmentCost.compute_cost` internally computes `I_total = I + Delta_I`,
+but the Bellman operator calls it with `(I, 0, K)` at stage 0 and `(0, ΔI, K)` at
+stage 1, so `I_total` equals the stage-specific investment in practice. The interface
+may be misleading if used outside the standard Bellman framework.
+
+### STAB-1: Contraction mapping property undocumented
+
+The two-stage Bellman operator is a contraction under semester discounting (β^{1/2} < 1
+at each stage). The effective per-year contraction modulus is β < 1. This has not been
+formally verified for all adjustment cost specifications.
+
+### STAB-2: Convergence tolerance for welfare comparisons
+
+The default `tol_vfi = 1e-6` provides ~6 significant digits. For welfare comparisons
+between models (e.g., option value of revision), the difference may be O(1e-3) of V,
+leaving only 2-3 significant digits. Use `tol_vfi = 1e-8` for precise welfare statements.
+
+### STAB-3: Simulation ergodicity
+
+The simulation starts firms at `K_init` and runs for `T_years`. If `T_years` is
+insufficient, panel statistics may reflect initial conditions rather than the ergodic
+distribution. Use a burn-in period (e.g., drop the first 20-50 years) or verify that
+moments stabilise over time.
 
 ## Support
 

@@ -46,8 +46,15 @@ function construct_estimation_panel(histories::Vector{FirmHistory})
     T = histories[1].T
     @assert all(h.T == T for h in histories) "All firms must have same length"
 
-    # Build rows
-    rows = []
+    # Build rows — typed vector avoids boxing overhead for large panels
+    PanelRow = NamedTuple{(:firm_id, :year, :K, :D, :D_half, :sigma, :sigma_half,
+                            :log_D, :log_D_half, :log_sigma, :log_sigma_half,
+                            :I, :Delta_I, :I_total, :I_rate, :profit),
+                           Tuple{Int, Int, Float64, Float64, Float64, Float64, Float64,
+                                 Float64, Float64, Float64, Float64,
+                                 Float64, Float64, Float64, Float64, Float64}}
+    rows = PanelRow[]
+    sizehint!(rows, n_firms * T)
 
     for (firm_id, hist) in enumerate(histories)
         for year in 1:hist.T
