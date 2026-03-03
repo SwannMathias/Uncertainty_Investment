@@ -11,6 +11,13 @@ using Distributed
 
 using Random
 
+project_root = dirname(@__DIR__)
+outdir = joinpath(project_root,
+                  "output",
+                  "simulations_no_uncertainty_fixed_cost")
+
+mkpath(outdir)
+
 ## 1. No uncertainty, Fixed cost
 # Increasing the fixed cost should decrease the frequency of investment. 
 # Set seed for reproducibility
@@ -38,7 +45,7 @@ params = ModelParameters(
     ),
     
     numerical = NumericalSettings(
-        n_K = 3000,
+        n_K = 100,
         n_D = 2,
         n_sigma = 2,    # Can reduce to 1 since σ ≈ 0
         K_min_factor = 0.1,
