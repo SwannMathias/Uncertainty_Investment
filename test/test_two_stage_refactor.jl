@@ -1,7 +1,7 @@
 using Test
 using UncertaintyInvestment
 
-function nested_stage1_value(K_stage1, i_D, i_sigma, i_K, K_current, V0, grids, params, ac_mid, derived, EV1_to_0)
+function nested_stage1_value(K_stage1, i_D, i_sigma, i_K, K_current, I_initial, V0, grids, params, ac_mid, derived, EV1_to_0)
     i_state = get_joint_state_index(grids, i_D, i_sigma)
     EV = @view EV1_to_0[:, i_state]
     K_dep = (1 - derived.delta_semester) * K_stage1
@@ -12,7 +12,7 @@ function nested_stage1_value(K_stage1, i_D, i_sigma, i_K, K_current, V0, grids, 
         end
         -compute_cost(ac_mid, 0.0, ΔI, K_current) + params.beta * linear_interp_1d(grids.K_grid, EV, K_next)
     end
-    Δmin = max(grids.K_min - K_dep, -K_dep + 1e-6)
+    Δmin = max(grids.K_min - K_dep, -K_dep + 1e-6, -I_initial)
     Δmax = grids.K_max - K_dep
     Δ, v = maximize_univariate(obj, Δmin, Δmax; tol=1e-6)
     return Δ, v
@@ -36,7 +36,7 @@ function nested_stage0_update!(V0_new, I_policy, V0, grids, params, ac_begin, ac
             cont = 0.0
             for i_state_half in 1:grids.n_states
                 i_D_half, i_sigma_half = get_D_sigma_indices(grids, i_state_half)
-                _, v_half = nested_stage1_value(K_stage1, i_D_half, i_sigma_half, i_K, K, V0,
+                _, v_half = nested_stage1_value(K_stage1, i_D_half, i_sigma_half, i_K, K, I, V0,
                                                 grids, params, ac_mid, derived, EV1_to_0)
                 pi_mid = get_profit(grids, i_K, i_D_half)
                 cont += probs[i_state_half] * (pi_mid + v_half)
@@ -44,8 +44,7 @@ function nested_stage0_update!(V0_new, I_policy, V0, grids, params, ac_begin, ac
             return pi_first - compute_cost(ac_begin, I, 0.0, K) + cont
         end
 
-        Imin = max(grids.K_min - (1 - derived.delta_semester) * K,
-                   -(1 - derived.delta_semester) * K + 1e-6)
+        Imin = 0.0
         Imax = grids.K_max - (1 - derived.delta_semester) * K
         I_opt, V_opt = maximize_univariate(obj_I, Imin, Imax; tol=1e-6)
         I_policy[i_K, i_D, i_sigma] = I_opt

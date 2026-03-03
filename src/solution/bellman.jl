@@ -100,7 +100,7 @@ function solve_midyear_problem(K_stage1::Float64, i_D::Int, i_sigma::Int,
         return -cost + derived.beta_semester * linear_interp_1d(grids.K_grid, EV, K_next)
     end
 
-    Delta_I_min = max(grids.K_min - K_dep, -K_dep + 1e-6)
+    Delta_I_min = max(grids.K_min - K_dep, -K_dep + 1e-6, -I_initial)
     Delta_I_max = grids.K_max - K_dep
 
     if ac_mid_year isa NoAdjustmentCost
@@ -157,8 +157,7 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
         return pi_first - cost + derived.beta_semester * (expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1))
     end
 
-    I_min = max(grids.K_min - (1 - derived.delta_semester) * K,
-                -(1 - derived.delta_semester) * K + 1e-6)
+    I_min = 0.0
     I_max = grids.K_max - (1 - derived.delta_semester) * K
 
     if ac_begin isa NoAdjustmentCost
@@ -175,10 +174,11 @@ end
 function update_stage1!(V1_new::Array{Float64,3}, Delta_I_policy::Array{Float64,3},
                         V0::Array{Float64,3}, grids::StateGrids, params::ModelParameters,
                         ac_mid_year::AbstractAdjustmentCost, derived::DerivedParameters,
-                        EV1_to_0::AbstractMatrix{Float64})
+                        EV1_to_0::AbstractMatrix{Float64},
+                        I_policy::Array{Float64,3})
     for i_sigma in 1:grids.n_sigma, i_D in 1:grids.n_D, i_K in 1:grids.n_K
         K = get_K(grids, i_K)
-        ΔI_opt, V_val = solve_midyear_problem(K, i_D, i_sigma, i_K, K, 0.0,
+        ΔI_opt, V_val = solve_midyear_problem(K, i_D, i_sigma, i_K, K, I_policy[i_K, i_D, i_sigma],
                                               V0, grids, params, ac_mid_year, derived, EV1_to_0)
         Delta_I_policy[i_K, i_D, i_sigma] = ΔI_opt
         V1_new[i_K, i_D, i_sigma] = V_val
@@ -211,7 +211,7 @@ function bellman_operator!(V0_new::Array{Float64,3}, V0::Array{Float64,3},
                            V1::Array{Float64,3}, V1_new::Array{Float64,3},
                            Delta_I_policy::Array{Float64,3})
     precompute_expectation_cache!(EV1_to_0, V0, grids; horizon=:semester)
-    update_stage1!(V1_new, Delta_I_policy, V0, grids, params, ac_mid_year, derived, EV1_to_0)
+    update_stage1!(V1_new, Delta_I_policy, V0, grids, params, ac_mid_year, derived, EV1_to_0, I_policy)
     precompute_expectation_cache!(EV0_to_1, V1_new, grids; horizon=:semester)
     update_stage0!(V0_new, I_policy, V1_new, grids, params, ac_begin, ac_mid_year, derived, EV0_to_1)
     return nothing
@@ -298,7 +298,7 @@ function bellman_operator_parallel!(V0_new::Array{Float64,3}, V0::Array{Float64,
         i_D = (temp % grids.n_D) + 1
         i_sigma = (temp ÷ grids.n_D) + 1
         K = get_K(grids, i_K)
-        ΔI_opt, V_val = solve_midyear_problem(K, i_D, i_sigma, i_K, K, 0.0,
+        ΔI_opt, V_val = solve_midyear_problem(K, i_D, i_sigma, i_K, K, I_policy[i_K, i_D, i_sigma],
                                               V0, grids, params, ac_mid_year, derived, EV1_to_0)
         Delta_I_policy[i_K, i_D, i_sigma] = ΔI_opt
         V1_new[i_K, i_D, i_sigma] = V_val
