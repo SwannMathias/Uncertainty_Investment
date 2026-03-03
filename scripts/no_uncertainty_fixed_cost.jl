@@ -45,7 +45,7 @@ params = ModelParameters(
     ),
     
     numerical = NumericalSettings(
-        n_K = 100,
+        n_K = 1000,
         n_D = 2,
         n_sigma = 2,    # Can reduce to 1 since σ ≈ 0
         K_min_factor = 0.1,
