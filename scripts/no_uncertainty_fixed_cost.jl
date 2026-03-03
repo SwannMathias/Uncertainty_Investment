@@ -45,7 +45,7 @@ params = ModelParameters(
     ),
     
     numerical = NumericalSettings(
-        n_K = 1000,
+        n_K = 50,
         n_D = 2,
         n_sigma = 2,    # Can reduce to 1 since σ ≈ 0
         K_min_factor = 0.1,
@@ -56,86 +56,133 @@ params = ModelParameters(
     )
 )
 
+test = false
+if test
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/grid_K.npy",construct_grids(params).K_grid)
+    ac_begin = FixedAdjustmentCost(F = 0.1)
+    ac_mid_year= FixedAdjustmentCost(F = 0.1)
+    sol_scenario1 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
 
-NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/grid_K.npy",construct_grids(params).K_grid)
-ac_begin = FixedAdjustmentCost(F = 0.1)
-ac_mid_year= FixedAdjustmentCost(F = 0.1)
-sol_scenario1 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
 
 
+    ac_begin = FixedAdjustmentCost(F = 1)
+    ac_mid_year= FixedAdjustmentCost(F = 1)
+    sol_scenario2 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
 
-ac_begin = FixedAdjustmentCost(F = 1)
-ac_mid_year= FixedAdjustmentCost(F = 1)
-sol_scenario2 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
+    # Generate shock panel
+    shocks = generate_shock_panel(
+        params.demand ,
+        params.volatility,
+        1000,  # Number of firms
+        200   # Number of semesters
+    )
+    histories = simulate_firm_panel(
+        sol_scenario1,
+        shocks;
+        K_init = 1.,
+        T_years = 100
+    )
+    panel = construct_estimation_panel(histories)
+    save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s11.csv", panel)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s11.npy",sol_scenario1.I_policy)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s11.npy",sol_scenario1.Delta_I_policy)
 
-# Generate shock panel
-shocks = generate_shock_panel(
-    params.demand ,
-    params.volatility,
-    1000,  # Number of firms
-    200   # Number of semesters
-)
-histories = simulate_firm_panel(
-    sol_scenario1,
-    shocks;
-    K_init = 1.,
-    T_years = 100
-)
-panel = construct_estimation_panel(histories)
-save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s11.csv", panel)
-NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s11.npy",sol_scenario1.I_policy)
-NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s11.npy",sol_scenario1.Delta_I_policy)
-
-histories = simulate_firm_panel(
-    sol_scenario2,
-    shocks;
-    K_init = 1.,
-    T_years = 100
-)
-panel = construct_estimation_panel(histories)
-save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s12.csv", panel)
-NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s12.npy",sol_scenario2.I_policy)
-NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s12.npy",sol_scenario2.Delta_I_policy)
+    histories = simulate_firm_panel(
+        sol_scenario2,
+        shocks;
+        K_init = 1.,
+        T_years = 100
+    )
+    panel = construct_estimation_panel(histories)
+    save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s12.csv", panel)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s12.npy",sol_scenario2.I_policy)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s12.npy",sol_scenario2.Delta_I_policy)
+end
 ## 2. No uncertainty, Different fixed cost
 # Increasing the fixed cost should decrease the frequency of investment. 
 # Set seed for reproducibility
 Random.seed!(12345)
+test = false
+if test
+    ac_begin = FixedAdjustmentCost(F = 0.1)
+    ac_mid_year= FixedAdjustmentCost(F = 0.1)
+    sol_scenario1 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
 
-ac_begin = FixedAdjustmentCost(F = 0.1)
-ac_mid_year= FixedAdjustmentCost(F = 0.1)
-sol_scenario1 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
+    ac_begin = FixedAdjustmentCost(F = 0.1)
+    ac_mid_year= FixedAdjustmentCost(F = 1)
+    sol_scenario2 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
 
-ac_begin = FixedAdjustmentCost(F = 0.1)
-ac_mid_year= FixedAdjustmentCost(F = 1)
-sol_scenario2 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
+    # Generate shock panel
+    shocks = generate_shock_panel(
+        params.demand ,
+        params.volatility,
+        1000,  # Number of firms
+        200   # Number of semesters
+    )
+    histories = simulate_firm_panel(
+        sol_scenario1,
+        shocks;
+        K_init = 1.,
+        T_years = 100
+    )
+    panel = construct_estimation_panel(histories)
+    save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s21.csv", panel)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s21.npy",sol_scenario1.I_policy)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s21.npy",sol_scenario1.Delta_I_policy)
 
-# Generate shock panel
-shocks = generate_shock_panel(
-    params.demand ,
-    params.volatility,
-    1000,  # Number of firms
-    200   # Number of semesters
-)
-histories = simulate_firm_panel(
-    sol_scenario1,
-    shocks;
-    K_init = 1.,
-    T_years = 100
-)
-panel = construct_estimation_panel(histories)
-save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s21.csv", panel)
-NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s21.npy",sol_scenario1.I_policy)
-NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s21.npy",sol_scenario1.Delta_I_policy)
+    histories = simulate_firm_panel(
+        sol_scenario2,
+        shocks;
+        K_init = 1.,
+        T_years = 100
+    )
+    panel = construct_estimation_panel(histories)
+    save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s22.csv", panel)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s22.npy",sol_scenario2.I_policy)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s22.npy",sol_scenario2.Delta_I_policy)
+end
 
-histories = simulate_firm_panel(
-    sol_scenario2,
-    shocks;
-    K_init = 1.,
-    T_years = 100
-)
-panel = construct_estimation_panel(histories)
-save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s22.csv", panel)
-NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s22.npy",sol_scenario2.I_policy)
-NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s22.npy",sol_scenario2.Delta_I_policy)
+## 3. No uncertainty, infinite fixed cost mid-year
+# Increasing the fixed cost should decrease the frequency of investment. 
+# Set seed for reproducibility
+Random.seed!(12345)
+test  = true
+if test
+    ac_begin = FixedAdjustmentCost(F = 0.1)
+    ac_mid_year= FixedAdjustmentCost(F = 0.1)
+    sol_scenario1 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
 
+    ac_begin = FixedAdjustmentCost(F = 0.1)
+    ac_mid_year= FixedAdjustmentCost(F = 1000)
+    sol_scenario2 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
+
+    # Generate shock panel
+    shocks = generate_shock_panel(
+        params.demand ,
+        params.volatility,
+        1000,  # Number of firms
+        200   # Number of semesters
+    )
+    histories = simulate_firm_panel(
+        sol_scenario1,
+        shocks;
+        K_init = 1.,
+        T_years = 100
+    )
+    panel = construct_estimation_panel(histories)
+    save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s31.csv", panel)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s31.npy",sol_scenario1.I_policy)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s31.npy",sol_scenario1.Delta_I_policy)
+
+    histories = simulate_firm_panel(
+        sol_scenario2,
+        shocks;
+        K_init = 1.,
+        T_years = 100
+    )
+    panel = construct_estimation_panel(histories)
+    save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s32.csv", panel)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s32.npy",sol_scenario2.I_policy)
+    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s32.npy",sol_scenario2.Delta_I_policy)
+end
 
