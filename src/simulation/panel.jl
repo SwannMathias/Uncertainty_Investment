@@ -38,6 +38,9 @@ Convert simulated firm histories into panel DataFrame.
   - I_rate: Investment rate (I_total / K)
   - profit: Annual profit
   - log_D, log_sigma: Log states
+  - E_last_semester: E[I_total_t | K_t, D_{t-1/2}, σ_{t-1/2}] (NaN for year 1)
+  - E_beginning: E[I_total_t | K_t, D_t, σ_t]
+  - E_half: E[I_total_t | info at t+1/2] = I_t + ΔI_t
 """
 function construct_estimation_panel(histories::Vector{FirmHistory})
     n_firms = length(histories)
@@ -49,10 +52,12 @@ function construct_estimation_panel(histories::Vector{FirmHistory})
     # Build rows — typed vector avoids boxing overhead for large panels
     PanelRow = NamedTuple{(:firm_id, :year, :K, :D, :D_half, :sigma, :sigma_half,
                             :log_D, :log_D_half, :log_sigma, :log_sigma_half,
-                            :I, :Delta_I, :I_total, :I_rate, :profit),
+                            :I, :Delta_I, :I_total, :I_rate, :profit,
+                            :E_last_semester, :E_beginning, :E_half),
                            Tuple{Int, Int, Float64, Float64, Float64, Float64, Float64,
                                  Float64, Float64, Float64, Float64,
-                                 Float64, Float64, Float64, Float64, Float64}}
+                                 Float64, Float64, Float64, Float64, Float64,
+                                 Float64, Float64, Float64}}
     rows = PanelRow[]
     sizehint!(rows, n_firms * T)
 
@@ -74,7 +79,10 @@ function construct_estimation_panel(histories::Vector{FirmHistory})
                 Delta_I = hist.Delta_I[year],
                 I_total = hist.I_total[year],
                 I_rate = hist.I_total[year] / hist.K[year],
-                profit = hist.profit[year]
+                profit = hist.profit[year],
+                E_last_semester = hist.E_last_semester[year],
+                E_beginning = hist.E_beginning[year],
+                E_half = hist.E_half[year]
             ))
         end
     end
