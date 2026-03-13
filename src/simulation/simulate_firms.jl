@@ -229,50 +229,71 @@ end
 
 """
     simulate_firm_panel(sol::SolvedModel, shocks::ShockPanel;
-                       K_init::Float64=1.0, T_years::Int=50) -> Vector{FirmHistory}
+                       K_init::Union{Float64, Nothing}=nothing,
+                       T_years::Int=50) -> Vector{FirmHistory}
 
 Simulate panel of firms using shock panel.
 
 # Arguments
 - `sol`: SolvedModel object
 - `shocks`: ShockPanel object
-- `K_init`: Initial capital for all firms (or can be randomized)
+- `K_init`: Initial capital for firms. If `Float64`, all firms start with this value.
+  If `nothing` (default), each firm is randomly assigned a capital level from the grid.
 - `T_years`: Number of years to simulate per firm
+- `use_parallel`: Whether to use multi-threaded parallelization (default: `true`)
+- `verbose`: Print progress information (default: `false`)
 
 # Returns
 - Vector of FirmHistory objects
 """
 function simulate_firm_panel(sol::SolvedModel, shocks::ShockPanel;
-                            K_init::Float64=1.0, T_years::Int=50,
+                            K_init::Union{Float64, Nothing}=nothing, T_years::Int=50,
                             use_parallel::Bool=true, verbose::Bool=false)
     @assert shocks.T >= 2 * T_years "Shock panel too short for requested simulation length"
+
+    n_firms = shocks.n_firms
+    grids = sol.grids
+
+    # Generate initial capital for each firm
+    K_inits = Vector{Float64}(undef, n_firms)
+    if K_init isa Float64
+        fill!(K_inits, K_init)
+    else
+        # Randomly assign each firm an initial capital from the grid.
+        # Use a deterministic seed for reproducibility.
+        rng = MersenneTwister(42)
+        for i in 1:n_firms
+            idx = rand(rng, 1:grids.n_K)
+            K_inits[i] = grids.K_grid[idx]
+        end
+    end
 
     n_threads = nthreads()
     use_parallel_actual = use_parallel && n_threads > 1
 
     if verbose
         if use_parallel_actual
-            println("Simulating $(shocks.n_firms) firms with $n_threads threads...")
+            println("Simulating $n_firms firms with $n_threads threads...")
         else
-            println("Simulating $(shocks.n_firms) firms (serial)...")
+            println("Simulating $n_firms firms (serial)...")
         end
     end
 
-    histories = Vector{FirmHistory}(undef, shocks.n_firms)
+    histories = Vector{FirmHistory}(undef, n_firms)
 
     if use_parallel_actual
         # Parallel simulation across firms
-        @threads for i in 1:shocks.n_firms
+        @threads for i in 1:n_firms
             D_path = shocks.D[i, :]
             sigma_path = shocks.sigma[i, :]
-            histories[i] = simulate_firm(sol, D_path, sigma_path, K_init; T_years=T_years)
+            histories[i] = simulate_firm(sol, D_path, sigma_path, K_inits[i]; T_years=T_years)
         end
     else
         # Serial simulation
-        for i in 1:shocks.n_firms
+        for i in 1:n_firms
             D_path = shocks.D[i, :]
             sigma_path = shocks.sigma[i, :]
-            histories[i] = simulate_firm(sol, D_path, sigma_path, K_init; T_years=T_years)
+            histories[i] = simulate_firm(sol, D_path, sigma_path, K_inits[i]; T_years=T_years)
         end
     end
 
@@ -281,7 +302,8 @@ end
 
 """
     simulate_firm_panel_parallel(sol::SolvedModel, shocks::ShockPanel;
-                                 K_init::Float64=1.0, T_years::Int=50,
+                                 K_init::Union{Float64, Nothing}=nothing,
+                                 T_years::Int=50,
                                  verbose::Bool=false) -> Vector{FirmHistory}
 
 Explicit parallel version of firm panel simulation.
@@ -302,8 +324,9 @@ provides a more explicit interface for parallel execution.
 
 # Reproducibility
 Results are deterministic because:
-- Shock paths are pre-generated (no RNG during simulation)
-- Each firm's trajectory depends only on its shock path
+- Shock paths are pre-generated (no RNG during simulation loop)
+- When `K_init=nothing`, initial capitals are drawn using a seeded RNG (seed=42)
+- Each firm's trajectory depends only on its shock path and initial capital
 - No race conditions in output array
 
 # Performance Notes
@@ -314,7 +337,8 @@ Results are deterministic because:
 # Arguments
 - `sol`: SolvedModel object with value and policy functions
 - `shocks`: ShockPanel with pre-generated shock paths
-- `K_init`: Initial capital for all firms (default: 1.0)
+- `K_init`: Initial capital for firms. If `Float64`, all firms start with this value.
+  If `nothing` (default), each firm is randomly assigned a capital level from the grid.
 - `T_years`: Number of years to simulate per firm
 - `verbose`: Print progress information
 
@@ -331,7 +355,7 @@ histories = simulate_firm_panel_parallel(sol, shocks; T_years=50)
 ```
 """
 function simulate_firm_panel_parallel(sol::SolvedModel, shocks::ShockPanel;
-                                      K_init::Float64=1.0, T_years::Int=50,
+                                      K_init::Union{Float64, Nothing}=nothing, T_years::Int=50,
                                       verbose::Bool=false)
     return simulate_firm_panel(sol, shocks; K_init=K_init, T_years=T_years,
                                use_parallel=true, verbose=verbose)
