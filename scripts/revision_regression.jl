@@ -14,7 +14,7 @@ using Random
 project_root = dirname(@__DIR__)
 outdir = joinpath(project_root,
                   "output",
-                  "simulations_uncertainty_variable_fixed_cost_Lamont")
+                  "simulations_revision_regression")
 
 mkpath(outdir)
 
@@ -60,23 +60,23 @@ ac_begin = FixedAdjustmentCost(F = 1)
 ac_mid_year = FixedAdjustmentCost(F = 1)
 
 
-NPZ.npzwrite("output/simulations_uncertainty_fixed_cost/grid_K.npy",construct_grids(params).K_grid)
+NPZ.npzwrite(joinpath(outdir,"grid_K.npy"),construct_grids(params).K_grid)
 sol_scenario1 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
 
 # Generate shock panel
 shocks = generate_shock_panel(
     params.demand ,
     params.volatility,
-    1000,  # Number of firms
-    200   # Number of semesters
+    100,  # Number of firms
+    20000   # Number of semesters
 )
 histories = simulate_firm_panel(
     sol_scenario1,
     shocks;
     K_init = 1.,
-    T_years = 100
+    T_years = 10000
 )
 panel = construct_estimation_panel(histories)
-save_simulation(outdir+"/panel_data_s11.csv", panel)
-NPZ.npzwrite(outdir+"/I_policy_s11.npy",sol_scenario1.I_policy)
-NPZ.npzwrite(outdir+"/Delta_I_policy_s11.npy",sol_scenario1.Delta_I_policy)
+save_simulation(joinpath(outdir,"panel_data_s11.csv"), panel)
+NPZ.npzwrite(joinpath(outdir,"I_policy_s11.npy"),sol_scenario1.I_policy)
+NPZ.npzwrite(joinpath(outdir,"Delta_I_policy_s11.npy"),sol_scenario1.Delta_I_policy)
