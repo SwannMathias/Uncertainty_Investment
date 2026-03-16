@@ -130,6 +130,26 @@ export panel_summary_statistics, print_panel_summary
 include("estimation/types.jl")
 export EstimationResult
 
+include("estimation/smm_config.jl")
+export SMMConfig, FixedCalibration, RevisionTransform
+export LOG_TRANSFORM, LEVEL_OVER_K_TRANSFORM, ASINH_TRANSFORM
+export build_model_parameters
+
+include("estimation/moments.jl")
+export compute_simulated_moments, compute_revision_panel
+export apply_transform, ols_coefficients
+
+include("estimation/smm_objective.jl")
+export smm_objective, ParticleState
+
+include("estimation/pso.jl")
+export PSOConfig, PSOResult, pso_optimize
+export latin_hypercube_sample
+export save_pso_checkpoint, load_pso_checkpoint, resume_pso
+
+include("estimation/run_estimation.jl")
+export run_smm_estimation
+
 # ============================================================================
 # Utilities
 # ============================================================================
