@@ -61,12 +61,14 @@ params = ModelParameters(
 )
 
 ac_mid_year = FixedAdjustmentCost(F = 100)
-range_phi_begin = range(0, stop=5, length=10)
+range_phi_begin = range(0, stop=5, length=2)
 
 test = true
 
 NPZ.npzwrite(joinpath(outdir,"grid_K.npy"),construct_grids(params).K_grid)
 NPZ.npzwrite(joinpath(outdir, "grid_D.npy"), construct_grids(params).sv.D_grid)
+NPZ.npzwrite(joinpath(outdir,"profits.npy"),construct_grids(params).precomputed_profits.profits)
+
 if test
     # Initialize empty DataFrame to collect all panels
     all_panels_df = DataFrame()

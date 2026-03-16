@@ -46,7 +46,7 @@ params = ModelParameters(
     
     numerical = NumericalSettings(
         n_K = 50,
-        n_D = 2,
+        n_D = 50,
         n_sigma = 2,    # Can reduce to 1 since σ ≈ 0
         K_min_factor = 0.1,
         K_max_factor = 10.0,
@@ -55,12 +55,13 @@ params = ModelParameters(
         howard_steps = 0
     )
 )
+NPZ.npzwrite(joinpath(outdir,"grid_K.npy"),construct_grids(params).K_grid)
+NPZ.npzwrite(joinpath(outdir, "grid_D.npy"), construct_grids(params).sv.D_grid)
 
-test = false
+test = true
 if test
-    NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/grid_K.npy",construct_grids(params).K_grid)
-    ac_begin = FixedAdjustmentCost(F = 0.1)
-    ac_mid_year= FixedAdjustmentCost(F = 0.1)
+    ac_begin = FixedAdjustmentCost(F = 0.)
+    ac_mid_year= FixedAdjustmentCost(F = 0.)
     sol_scenario1 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
 
 
@@ -84,6 +85,8 @@ if test
     )
     panel = construct_estimation_panel(histories)
     save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s11.csv", panel)
+    NPZ.npzwrite(joinpath(outdir, "V_s11.npy"), sol_scenario1.V)
+    NPZ.npzwrite(joinpath(outdir, "V_stage1_s11.npy"), sol_scenario1.V_stage1)
     NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s11.npy",sol_scenario1.I_policy)
     NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s11.npy",sol_scenario1.Delta_I_policy)
 
@@ -95,6 +98,9 @@ if test
     )
     panel = construct_estimation_panel(histories)
     save_simulation("output/simulations_no_uncertainty_fixed_cost/panel_data_s12.csv", panel)
+    
+    NPZ.npzwrite(joinpath(outdir, "V_s12.npy"), sol_scenario2.V)
+    NPZ.npzwrite(joinpath(outdir, "V_stage1_s12.npy"), sol_scenario2.V_stage1)
     NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/I_policy_s12.npy",sol_scenario2.I_policy)
     NPZ.npzwrite("output/simulations_no_uncertainty_fixed_cost/Delta_I_policy_s12.npy",sol_scenario2.Delta_I_policy)
 end
@@ -146,7 +152,7 @@ end
 # Increasing the fixed cost should decrease the frequency of investment. 
 # Set seed for reproducibility
 Random.seed!(12345)
-test  = true
+test  = false
 if test
     ac_begin = FixedAdjustmentCost(F = 0.1)
     ac_mid_year= FixedAdjustmentCost(F = 0.1)

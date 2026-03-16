@@ -2,7 +2,7 @@
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "69f823d84fe9863d02034424a0d756b808180a6c"
+project_hash = "d50dbe700b25475bf3b846b2657b31162c1eb73d"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "f7304359109c768cf32dc5fa2d371565bb63b68a"
@@ -868,7 +868,7 @@ uuid = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 version = "1.0.2"
 
 [[deps.UncertaintyInvestment]]
-deps = ["CSV", "DataFrames", "Distributions", "ForwardDiff", "Interpolations", "JLD2", "LinearAlgebra", "NLsolve", "Optim", "Parameters", "Printf", "ProgressMeter", "Random", "Statistics"]
+deps = ["CSV", "DataFrames", "Distributions", "ForwardDiff", "Interpolations", "JLD2", "LinearAlgebra", "NLsolve", "NPZ", "Optim", "Parameters", "Printf", "ProgressMeter", "Random", "Statistics"]
 path = "."
 uuid = "8b5f4c9e-1234-5678-9abc-def012345678"
 version = "0.1.0"
