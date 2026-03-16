@@ -39,8 +39,8 @@ params = ModelParameters(
     ),
     volatility = VolatilityProcess(
         sigma_bar = sigma_bar_1,  # ~10% demand volatility per semester
-        rho_sigma = 0.10,      # Persistent volatility regime
-        sigma_eta = 0.10,      # Moderate stochastic volatility
+        rho_sigma = 0.1,      # Persistent volatility regime
+        sigma_eta = 0.1,      # Moderate stochastic volatility
         rho_epsilon_eta = 0.0
     ),
     
@@ -56,25 +56,27 @@ params = ModelParameters(
     )
 )
 
-ac_begin = FixedAdjustmentCost(F = 1)
-ac_mid_year = FixedAdjustmentCost(F = 1)
+ac_begin = FixedAdjustmentCost(F = 0)
+ac_mid_year = FixedAdjustmentCost(F = 100)
 
 
 NPZ.npzwrite(joinpath(outdir,"grid_K.npy"),construct_grids(params).K_grid)
+NPZ.npzwrite(joinpath(outdir, "grid_D.npy"), construct_grids(params).sv.D_grid)
+#NPZ.npzwrite(joinpath(outdir,"grid_sigma.npy"),construct_grids(params).sigma_grid)
 sol_scenario1 = solve_model(params; ac_begin=ac_begin,ac_mid_year = ac_mid_year, verbose=true,use_parallel=true, use_multiscale=true)
 
 # Generate shock panel
 shocks = generate_shock_panel(
     params.demand ,
     params.volatility,
-    100,  # Number of firms
-    20000   # Number of semesters
+    1000,  # Number of firms
+    2000   # Number of semesters
 )
 histories = simulate_firm_panel(
     sol_scenario1,
     shocks;
-    K_init = 1.,
-    T_years = 10000
+    K_init = nothing,
+    T_years = 1000
 )
 panel = construct_estimation_panel(histories)
 save_simulation(joinpath(outdir,"panel_data_s11.csv"), panel)

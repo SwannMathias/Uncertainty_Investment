@@ -97,7 +97,7 @@ function solve_midyear_problem(K_stage1::Float64, i_D::Int, i_sigma::Int,
             return -1e10
         end
         cost = compute_cost(ac_mid_year, 0.0, Delta_I, K_current)
-        return -cost + derived.beta_semester * linear_interp_1d(grids.K_grid, EV, K_next)
+        return -Delta_I - cost + derived.beta_semester * linear_interp_1d(grids.K_grid, EV, K_next)
     end
 
     Delta_I_min = max(grids.K_min - K_dep, -K_dep + 1e-6, -I_initial)
@@ -154,7 +154,7 @@ function solve_beginning_year_problem(i_K::Int, i_D::Int, i_sigma::Int,
             return -1e10
         end
         cost = compute_cost(ac_begin, I, 0.0, K)
-        return pi_first - cost + derived.beta_semester * (expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1))
+        return pi_first - I - cost + derived.beta_semester * (expected_pi_mid + linear_interp_1d(grids.K_grid, EV, K_stage1))
     end
 
     I_min = 0.0
