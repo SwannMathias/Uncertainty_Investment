@@ -10,7 +10,7 @@ A comprehensive Julia package for solving and estimating dynamic investment mode
 - **Efficient Solution**: Value function iteration with Howard acceleration
 - **Multi-Core Parallelization**: Thread-based parallel execution for VFI and simulation
 - **Simulation**: Generate firm panels from solved models
-- **GMM Estimation**: Indirect inference via auxiliary regressions (planned)
+- **SMM-PSO Estimation**: Simulated Method of Moments with Particle Swarm Optimization
 
 ## Installation
 
@@ -178,7 +178,7 @@ Both methods produce identical results (differences < 1e-4).
 
 **Highly recommended when:**
 - Fine grids (n_K > 50)
-- Repeated solves (GMM estimation)
+- Repeated solves (SMM estimation)
 - Smooth value functions (no/convex adjustment costs)
 
 **Less beneficial when:**
@@ -211,6 +211,130 @@ The multi-scale solver:
 - Maintains exact same model specification
 - Fully compatible with all adjustment cost types
 - Works with both serial and parallel execution
+
+## SMM Estimation via PSO
+
+The package estimates structural adjustment cost parameters by matching simulated moments to empirical targets using **Simulated Method of Moments (SMM)** with a **Particle Swarm Optimization (PSO)** search algorithm.
+
+### Key Features
+
+- **Flexible parameter specification**: Declare which parameters are estimated (with bounds) vs held fixed (with values) via a dict-based interface
+- **Warm-starting VFI**: Each PSO particle caches its value function, so repeated model solves start from the previous solution
+- **Latin Hypercube initialization**: Better coverage of the parameter space than uniform random sampling
+- **Checkpointing and resume**: Full PSO state saved periodically; estimation can be resumed from any checkpoint
+- **Dimension-agnostic**: Works with any subset of the 4 composite cost parameters `{F_begin, F_mid, phi_begin, phi_mid}`
+
+### Julia API
+
+```julia
+using UncertaintyInvestment
+using StatsModels: @formula
+
+# Estimate all 4 parameters (composite fixed + convex costs)
+config = SMMConfig(
+    calibration = FixedCalibration(),
+    m_data = [0.35, 0.50, -0.15, 0.10],
+    shock_seed = 42,
+)
+
+pso_config = PSOConfig(
+    n_particles = 20,
+    max_iterations = 100,
+    verbose = true,
+    output_dir = "output/estimation/run_001",
+)
+
+result = run_smm_estimation(config, pso_config)
+
+println("Best parameters: ", result.theta_best)
+println("Objective: ", result.objective_best)
+println("Converged: ", result.converged)
+```
+
+### Dict-Based Parameter Specification
+
+The cost structure is always composite (FixedAdjustmentCost + ConvexAdjustmentCost at each stage). Use `fixed_params` and `estimated_params` to control which parameters are optimized:
+
+```julia
+# Estimate convex costs only, hold fixed costs constant
+config = SMMConfig(
+    fixed_params = Dict(:F_begin => 0.5, :F_mid => 0.5),
+    estimated_params = Dict(:phi_begin => (0.0, 20.0), :phi_mid => (0.0, 20.0)),
+    moments = [
+        RegressionCoefficientMoment(:begin,
+            @formula(revision_begin ~ log_sigma + log_K + log_D),
+            :log_sigma, "coef_begin_sigma"),
+        RegressionCoefficientMoment(:mid,
+            @formula(revision_mid ~ log_sigma_half + log_K + log_D),
+            :log_sigma_half, "coef_mid_sigma"),
+    ],
+    m_data = [-0.15, 0.10],
+)
+```
+
+Available parameters and their mapping:
+
+| Parameter | Stage | Cost Type | Field |
+|-----------|-------|-----------|-------|
+| `:F_begin` | `:begin` | `FixedAdjustmentCost` | `:F` |
+| `:F_mid` | `:mid` | `FixedAdjustmentCost` | `:F` |
+| `:phi_begin` | `:begin` | `ConvexAdjustmentCost` | `:phi` |
+| `:phi_mid` | `:mid` | `ConvexAdjustmentCost` | `:phi` |
+
+Available moment types:
+- `ShareZeroMoment(stage, name)` — fraction of firms with near-zero investment at a given stage
+- `RegressionCoefficientMoment(stage, formula, coef_name, name)` — OLS coefficient from a fixest-style `@formula`
+
+### CLI Usage
+
+```bash
+# Default: estimate all 4 parameters
+julia -t 1 scripts/run_smm.jl \
+    --n_particles 20 \
+    --max_iterations 100 \
+    --m_data "0.35,0.50,-0.15,0.10" \
+    --output output/estimation/run_001/
+
+# Convex costs only with fixed costs held constant
+julia -t 1 scripts/run_smm.jl \
+    --fixed_params "F_begin=0.5,F_mid=0.5" \
+    --estimated_params "phi_begin=0:20,phi_mid=0:20" \
+    --m_data "-0.15,0.10" \
+    --max_iterations 50 \
+    --output output/estimation/convex_run/
+
+# Resume from checkpoint
+julia -t 1 scripts/run_smm.jl \
+    --resume output/estimation/run_001/checkpoint_iter_50.jld2 \
+    --output output/estimation/run_001/
+```
+
+### PSO Hyperparameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `n_particles` | 20 | Number of swarm particles |
+| `max_iterations` | 100 | Maximum PSO iterations |
+| `w_inertia` | 0.7 | Inertia weight (momentum) |
+| `c_cognitive` | 1.5 | Pull toward personal best |
+| `c_social` | 1.5 | Pull toward global best |
+| `reassign_every` | 20 | Re-randomize worst particles every N iterations (0 = disabled) |
+| `reassign_fraction` | 0.1 | Fraction of particles to reassign |
+| `tol_objective` | 1e-8 | Convergence tolerance |
+| `patience` | 20 | Stop after N iterations without improvement |
+| `checkpoint_every` | 10 | Save checkpoint every N iterations |
+
+### Output Files
+
+After estimation, the output directory contains:
+
+| File | Contents |
+|------|----------|
+| `smm_results.jld2` | Best parameters, moments, convergence info |
+| `pso_history.jld2` | Full iteration history (theta and objective per iteration) |
+| `pso_log.log` | CSV log of each iteration |
+| `estimation_summary.txt` | Human-readable results summary |
+| `checkpoint_iter_N.jld2` | PSO state snapshots for crash recovery |
 
 ## Model Specification
 
@@ -332,6 +456,14 @@ Uncertainty_Investment/
 │   │   ├── simulate_shocks.jl
 │   │   ├── simulate_firms.jl
 │   │   └── panel.jl
+│   ├── estimation/              # SMM-PSO estimation
+│   │   ├── types.jl
+│   │   ├── estimation_spec.jl
+│   │   ├── smm_config.jl
+│   │   ├── moments.jl
+│   │   ├── smm_objective.jl
+│   │   ├── pso.jl
+│   │   └── run_estimation.jl
 │   └── utils/                   # Utilities
 │       ├── numerical.jl
 │       └── io.jl
@@ -500,7 +632,7 @@ This package implements models from the literature on dynamic investment under u
 - ✅ Adjustment cost menu
 - ✅ Stochastic volatility
 - ✅ Multi-core parallelization (VFI + Simulation)
-- 🚧 GMM estimation (in progress)
+- ✅ SMM-PSO estimation
 - ✅ Comprehensive tests
 
 ## Support
