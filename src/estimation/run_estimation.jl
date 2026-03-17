@@ -29,13 +29,20 @@ Run full SMM estimation pipeline.
 
 # Example
 ```julia
+# Default 4-parameter composite spec
 config = SMMConfig(
     calibration = FixedCalibration(rho_D=0.5, sigma_bar=log(0.1)),
     m_data = [0.35, 0.50, -0.15, 0.10],
-    n_firms = 1000,
-    T_years = 50,
-    burn_in_years = 30
+    n_firms = 1000, T_years = 50, burn_in_years = 30
 )
+
+# Convex-only 2-parameter spec
+config_convex = SMMConfig(
+    estimation_spec = convex_only_spec(),
+    m_data = [-0.15, 0.10],
+    n_firms = 1000, T_years = 50, burn_in_years = 30
+)
+
 pso_config = PSOConfig(n_particles=10, max_iterations=50, verbose=true)
 result = run_smm_estimation(config, pso_config)
 ```
@@ -43,6 +50,10 @@ result = run_smm_estimation(config, pso_config)
 function run_smm_estimation(config::SMMConfig, pso_config::PSOConfig;
                             grids::Union{Nothing, StateGrids}=nothing,
                             shocks::Union{Nothing, ShockPanel}=nothing)
+    spec = config.estimation_spec
+    np = n_params(spec)
+    nm = n_moments(spec)
+
     if pso_config.verbose
         println("="^70)
         println("SMM-PSO Estimation")
@@ -54,14 +65,15 @@ function run_smm_estimation(config::SMMConfig, pso_config::PSOConfig;
         @printf("  rho_D=%.2f, sigma_bar=%.4f, rho_sigma=%.2f, sigma_eta=%.2f\n",
                 config.calibration.rho_D, config.calibration.sigma_bar,
                 config.calibration.rho_sigma, config.calibration.sigma_eta)
-        println("\nEstimation Setup:")
-        @printf("  Parameters: F_begin in [%.1f,%.1f], F_mid in [%.1f,%.1f]\n",
-                config.lower_bounds[1], config.upper_bounds[1],
-                config.lower_bounds[2], config.upper_bounds[2])
-        @printf("              phi_begin in [%.1f,%.1f], phi_mid in [%.1f,%.1f]\n",
-                config.lower_bounds[3], config.upper_bounds[3],
-                config.lower_bounds[4], config.upper_bounds[4])
-        @printf("  Targets: [%.4f, %.4f, %.4f, %.4f]\n", config.m_data...)
+        println("\nEstimation Specification:")
+        @printf("  Parameters (%d): %s\n", np, join(string.(spec.param_names), ", "))
+        for (i, pname) in enumerate(spec.param_names)
+            @printf("    %-16s in [%.1f, %.1f]\n", string(pname),
+                    spec.lower_bounds[i], spec.upper_bounds[i])
+        end
+        mnames = moment_names(spec)
+        @printf("  Moments (%d): %s\n", nm, join(mnames, ", "))
+        @printf("  Targets: [%s]\n", join([@sprintf("%.4f", m) for m in config.m_data], ", "))
         @printf("  Transform: %s\n", string(config.revision_transform))
         @printf("  Simulation: %d firms x %d years (burn-in: %d)\n",
                 config.n_firms, config.T_years, config.burn_in_years)
@@ -116,6 +128,11 @@ end
 Save estimation results to the output directory.
 """
 function _save_final_results(result::PSOResult, config::SMMConfig, pso_config::PSOConfig)
+    spec = config.estimation_spec
+    np = n_params(spec)
+    nm = n_moments(spec)
+    mnames = moment_names(spec)
+
     mkpath(pso_config.output_dir)
 
     # Save main results to JLD2
@@ -130,9 +147,10 @@ function _save_final_results(result::PSOResult, config::SMMConfig, pso_config::P
                 n_evaluations=result.n_evaluations,
                 converged=result.converged,
                 elapsed_time=result.elapsed_time,
-                param_names=["F_begin", "F_mid", "phi_begin", "phi_mid"],
-                lower_bounds=config.lower_bounds,
-                upper_bounds=config.upper_bounds)
+                param_names=string.(spec.param_names),
+                moment_names=mnames,
+                lower_bounds=spec.lower_bounds,
+                upper_bounds=spec.upper_bounds)
 
         # Save history if available
         if !isnothing(result.history_objective)
@@ -152,18 +170,16 @@ function _save_final_results(result::PSOResult, config::SMMConfig, pso_config::P
             println(io, "="^50)
             println(io, "")
             println(io, "Estimated Parameters:")
-            @printf(io, "  F_begin    = %.6f\n", result.theta_best[1])
-            @printf(io, "  F_mid      = %.6f\n", result.theta_best[2])
-            @printf(io, "  phi_begin  = %.6f\n", result.theta_best[3])
-            @printf(io, "  phi_mid    = %.6f\n", result.theta_best[4])
+            for (i, pname) in enumerate(spec.param_names)
+                @printf(io, "  %-16s = %.6f\n", string(pname), result.theta_best[i])
+            end
             println(io, "")
             println(io, "Objective: $(result.objective_best)")
             println(io, "")
             println(io, "Moments (simulated vs data):")
-            moment_names = ["share_zero_begin", "share_zero_mid", "coef_begin", "coef_mid"]
-            for i in 1:4
+            for i in 1:nm
                 @printf(io, "  %-20s sim=%.6f  data=%.6f  diff=%.6f\n",
-                        moment_names[i],
+                        mnames[i],
                         result.moments_best[i], result.moments_data[i],
                         result.moments_best[i] - result.moments_data[i])
             end

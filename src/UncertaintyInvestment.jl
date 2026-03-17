@@ -42,6 +42,8 @@ using DataFrames
 using JLD2
 using ProgressMeter
 using Printf
+using FixedEffectModels
+using StatsModels
 
 # Threading support (Julia Base)
 using Base.Threads: @threads, nthreads, threadid
@@ -130,13 +132,21 @@ export panel_summary_statistics, print_panel_summary
 include("estimation/types.jl")
 export EstimationResult
 
+include("estimation/estimation_spec.jl")
+export EstimationSpec, AbstractMoment, ShareZeroMoment, RegressionCoefficientMoment
+export CostParameterMapping, build_adjustment_costs
+export composite_spec, convex_only_spec, fixed_only_spec
+export build_estimation_spec, COMPOSITE_PARAM_DEFS, COMPOSITE_PARAM_ORDER
+export n_params, n_moments, moment_names
+
 include("estimation/smm_config.jl")
 export SMMConfig, FixedCalibration, RevisionTransform
 export LOG_TRANSFORM, LEVEL_OVER_K_TRANSFORM, ASINH_TRANSFORM
 export build_model_parameters
+export get_lower_bounds, get_upper_bounds, get_param_names
 
 include("estimation/moments.jl")
-export compute_simulated_moments, compute_revision_panel
+export compute_simulated_moments, compute_revision_panel, prepare_regression_df
 export apply_transform, ols_coefficients
 
 include("estimation/smm_objective.jl")

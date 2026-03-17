@@ -2,15 +2,17 @@
 Moment computation for SMM estimation.
 
 # Economic context
-The estimation matches 4 simulated moments to empirical targets:
-1. Share of zero beginning-of-year investment revisions
-2. Share of zero mid-year investment revisions
-3. OLS coefficient of beginning-of-year revision on log uncertainty
-4. OLS coefficient of mid-year revision on log uncertainty
+The estimation matches simulated moments to empirical targets. Available moments:
+1. Share of zero investment revisions (extensive margin — identifies fixed costs)
+2. OLS regression coefficients (intensive margin — identifies convex costs)
 
-Investment revisions measure how firms update their investment plans
-as new information arrives within the year.
+Moments are declared via EstimationSpec and computed dynamically from the
+simulated firm panel. Regression moments use FixedEffectModels.jl (Julia's
+equivalent of R's fixest) for clear, modifiable formula specifications.
 """
+
+using FixedEffectModels: reg, FixedEffectModel
+using StatsModels: @formula, FormulaTerm, coefnames
 
 """
     apply_transform(E_new, E_old, K, transform::RevisionTransform) -> Float64
@@ -53,7 +55,7 @@ end
 Compute OLS coefficients: beta = (X'X)^{-1} X'y.
 
 X should include a constant column. No external package dependency.
-For the 4-regressor case in moment computation, this is trivially fast.
+Kept for backward compatibility and testing (cross-validation with reg()).
 """
 function ols_coefficients(y::Vector{Float64}, X::Matrix{Float64})
     return (X' * X) \ (X' * y)
@@ -98,29 +100,51 @@ function compute_revision_panel(df::DataFrame, config::SMMConfig)
 end
 
 """
+    prepare_regression_df(df::DataFrame, config::SMMConfig) -> DataFrame
+
+Prepare a DataFrame for regression-based moment computation.
+
+Adds computed columns needed by regression formulas:
+- `revision_begin`, `revision_mid` (from transforms)
+- `log_K` (log of capital, not in raw panel)
+
+Filters out invalid observations (year 1 for begin, NaN revisions).
+"""
+function prepare_regression_df(df::DataFrame, config::SMMConfig)
+    # Add revision columns
+    result = compute_revision_panel(df, config)
+
+    # Add log_K column (not in raw panel — panel has K but not log_K)
+    result.log_K = log.(result.K)
+
+    return result
+end
+
+"""
     compute_simulated_moments(panel_df::DataFrame, config::SMMConfig) -> Vector{Float64}
 
-Compute 4 simulated moments from a firm panel.
+Compute simulated moments from a firm panel according to the EstimationSpec.
 
-# Moments
-1. Share of zero beginning-of-year revisions
-2. Share of zero mid-year revisions
-3. OLS coefficient of beginning-of-year revision on log(sigma)
-4. OLS coefficient of mid-year revision on log(sigma_half)
+Iterates over `config.estimation_spec.moments` and computes each moment:
+- `ShareZeroMoment`: share of observations with near-zero revisions
+- `RegressionCoefficientMoment`: OLS coefficient via FixedEffectModels.jl `reg()`
 
 # Returns
-- 4-element vector of simulated moments. Returns fill(NaN, 4) if regressions fail.
+- Vector of length `n_moments(config.estimation_spec)`. Returns NaN for failed moments.
 
 # Implementation notes
-- Year 1 observations are dropped (E_last_semester is NaN).
+- Year 1 observations are dropped for beginning-of-year moments (E_last_semester is NaN).
 - Rows with NaN revisions (from log transform of non-positive values) are dropped.
-- If >50% of observations are dropped by the log transform, a warning is logged.
+- Requires ≥10 valid observations per moment to proceed.
 """
 function compute_simulated_moments(panel_df::DataFrame, config::SMMConfig)
-    # Step 1: Compute revisions
-    df = compute_revision_panel(panel_df, config)
+    spec = config.estimation_spec
+    nm = n_moments(spec)
 
-    # Step 2: Filter — drop year 1 (E_last_semester is NaN) and NaN revisions
+    # Prepare DataFrame with revision columns and log_K
+    df = prepare_regression_df(panel_df, config)
+
+    # Pre-compute validity masks
     valid_begin = .!isnan.(df.revision_begin) .& .!isnan.(df.E_last_semester)
     valid_mid = .!isnan.(df.revision_mid)
 
@@ -128,7 +152,7 @@ function compute_simulated_moments(panel_df::DataFrame, config::SMMConfig)
     n_valid_begin = sum(valid_begin)
     n_valid_mid = sum(valid_mid)
 
-    # Warn if too many observations dropped (suggests bad parameter region)
+    # Warn if too many observations dropped by log transform
     if config.revision_transform == LOG_TRANSFORM
         if n_valid_begin < n_total / 2
             @warn "Log transform dropped >50% of beginning-of-year observations " *
@@ -141,42 +165,99 @@ function compute_simulated_moments(panel_df::DataFrame, config::SMMConfig)
         end
     end
 
-    # Check we have enough observations for regressions
-    if n_valid_begin < 10 || n_valid_mid < 10
-        @warn "Too few valid observations for moment computation " *
-              "(begin: $n_valid_begin, mid: $n_valid_mid). Returning NaN."
-        return fill(NaN, 4)
+    # Compute each moment
+    moments = Vector{Float64}(undef, nm)
+    for (i, m) in enumerate(spec.moments)
+        moments[i] = _compute_single_moment(m, df, valid_begin, valid_mid, config)
     end
 
-    # Step 3: Share-of-zero moments
-    m1 = mean(abs.(df.revision_begin[valid_begin]) .< config.zero_threshold)
-    m2 = mean(abs.(df.revision_mid[valid_mid]) .< config.zero_threshold)
+    return moments
+end
 
-    # Step 4: Regression — beginning-of-year revision on log(sigma)
-    # revision_begin_{i,t} = alpha + beta_1 log(sigma_t) + beta_2 log(K_t) + beta_3 log(D_t) + eps
-    y_begin = df.revision_begin[valid_begin]
-    X_begin = hcat(
-        ones(n_valid_begin),
-        df.log_sigma[valid_begin],
-        log.(df.K[valid_begin]),
-        df.log_D[valid_begin]
-    )
+"""
+    _compute_single_moment(m::ShareZeroMoment, df, valid_begin, valid_mid, config) -> Float64
 
-    m3 = _safe_ols_coef(y_begin, X_begin, 2)
+Compute share of near-zero revisions for the given stage.
+"""
+function _compute_single_moment(m::ShareZeroMoment, df::DataFrame,
+                                 valid_begin::BitVector, valid_mid::BitVector,
+                                 config::SMMConfig)
+    if m.stage == :begin
+        valid = valid_begin
+        revision_col = df.revision_begin
+    else
+        valid = valid_mid
+        revision_col = df.revision_mid
+    end
 
-    # Step 5: Regression — mid-year revision on log(sigma_half)
-    # revision_mid_{i,t} = alpha + beta_1 log(sigma_{t+1/2}) + beta_2 log(K_t) + beta_3 log(D_t) + eps
-    y_mid = df.revision_mid[valid_mid]
-    X_mid = hcat(
-        ones(n_valid_mid),
-        df.log_sigma_half[valid_mid],
-        log.(df.K[valid_mid]),
-        df.log_D[valid_mid]
-    )
+    n_valid = sum(valid)
+    if n_valid < 10
+        @warn "Too few valid observations for $(m.name) ($n_valid). Returning NaN."
+        return NaN
+    end
 
-    m4 = _safe_ols_coef(y_mid, X_mid, 2)
+    return mean(abs.(revision_col[valid]) .< config.zero_threshold)
+end
 
-    return [m1, m2, m3, m4]
+"""
+    _compute_single_moment(m::RegressionCoefficientMoment, df, valid_begin, valid_mid, config) -> Float64
+
+Compute an OLS regression coefficient using FixedEffectModels.jl `reg()`.
+
+The regression is estimated on the stage-appropriate subset of observations.
+The coefficient named by `m.coef_name` is extracted from the results.
+"""
+function _compute_single_moment(m::RegressionCoefficientMoment, df::DataFrame,
+                                 valid_begin::BitVector, valid_mid::BitVector,
+                                 config::SMMConfig)
+    # Select stage-appropriate observations
+    valid = m.stage == :begin ? valid_begin : valid_mid
+    n_valid = sum(valid)
+
+    if n_valid < 10
+        @warn "Too few valid observations for $(m.name) ($n_valid). Returning NaN."
+        return NaN
+    end
+
+    # Subset DataFrame for regression
+    df_reg = df[valid, :]
+
+    # Check for zero variance in dependent variable
+    dep_var_name = m.formula.lhs.sym
+    if std(df_reg[!, dep_var_name]) < 1e-15
+        return NaN
+    end
+
+    # Run regression using FixedEffectModels.jl
+    result = try
+        reg(df_reg, m.formula)
+    catch e
+        @warn "Regression failed for $(m.name): $e"
+        return NaN
+    end
+
+    # Extract the coefficient of interest
+    coef_idx = _find_coef_index(result, m.coef_name)
+    if isnothing(coef_idx)
+        @warn "Coefficient $(m.coef_name) not found in regression for $(m.name). " *
+              "Available: $(coefnames(result))"
+        return NaN
+    end
+
+    coef_val = coef(result)[coef_idx]
+    return isfinite(coef_val) ? coef_val : NaN
+end
+
+"""
+    _find_coef_index(result::FixedEffectModel, name::Symbol) -> Union{Int, Nothing}
+
+Find the index of a named coefficient in a FixedEffectModels regression result.
+"""
+function _find_coef_index(result::FixedEffectModel, name::Symbol)
+    names = coefnames(result)
+    name_str = string(name)
+    idx = findfirst(==(name_str), names)
+    return idx
 end
 
 """
@@ -184,6 +265,8 @@ end
 
 Run OLS and return the specified coefficient. Returns NaN if regression fails
 (e.g., singular X'X due to zero-variance regressors).
+
+Kept for backward compatibility and testing.
 """
 function _safe_ols_coef(y::Vector{Float64}, X::Matrix{Float64}, coef_index::Int)
     try

@@ -13,6 +13,7 @@ vector. Particles move through the parameter space guided by:
 - Random reassignment: Worst-performing particles are periodically randomized
 - Hybrid parallelism: Distributed (across particles) + Threading (within VFI)
 - Checkpointing: Full state saved periodically for crash recovery
+- Dimension-agnostic: Works with any number of parameters via EstimationSpec
 """
 
 using Random
@@ -133,6 +134,7 @@ end
 
 Generate n_samples points in [lower, upper] using Latin Hypercube Sampling.
 Provides better coverage of the parameter space than uniform random sampling.
+Dimension-agnostic: works with any length(lower).
 """
 function latin_hypercube_sample(n_samples::Int, lower::Vector{Float64},
                                 upper::Vector{Float64}; rng=Random.GLOBAL_RNG)
@@ -159,6 +161,9 @@ end
 
 Run PSO optimization for SMM estimation (serial version, no Distributed).
 
+Dimension-agnostic: adapts to the number of parameters and moments
+defined in `config.estimation_spec`.
+
 # Arguments
 - `config`: SMM estimation configuration
 - `pso_config`: PSO optimizer configuration
@@ -176,11 +181,6 @@ Run PSO optimization for SMM estimation (serial version, no Distributed).
    e. Check convergence
    f. Log progress and checkpoint
 3. Return best result
-
-# Parallelism note
-This is the serial implementation (Phase 2). For distributed parallelism
-(Phase 3), use `pso_optimize_distributed` which replaces the serial
-evaluation loop with @spawnat calls to worker processes.
 """
 function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
                       grids::Union{Nothing, StateGrids}=nothing,
@@ -189,6 +189,12 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
     rng = isnothing(rng) ? MersenneTwister(config.shock_seed + 1000) : rng
     n_particles = pso_config.n_particles
     t_start = time()
+
+    spec = config.estimation_spec
+    np = n_params(spec)
+    nm = n_moments(spec)
+    lower = spec.lower_bounds
+    upper = spec.upper_bounds
 
     # --- Setup ---
 
@@ -212,24 +218,25 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
     # Create output directory
     mkpath(pso_config.output_dir)
 
-    # Initialize optimization log
+    # Initialize optimization log with dynamic header
     log_file = joinpath(pso_config.output_dir, "pso_log.log")
     open(log_file, "w") do io
-        println(io, "iter,best_Q,F_begin,F_mid,phi_begin,phi_mid," *
-                    "m1_sim,m2_sim,m3_sim,m4_sim,n_converged,iter_time")
+        param_header = join(string.(spec.param_names), ",")
+        moment_header = join(["m$(i)_sim" for i in 1:nm], ",")
+        println(io, "iter,best_Q,$param_header,$moment_header,n_converged,iter_time")
     end
 
     # --- Initialize particles via Latin Hypercube Sampling ---
-    lhs = latin_hypercube_sample(n_particles, config.lower_bounds, config.upper_bounds; rng=rng)
+    lhs = latin_hypercube_sample(n_particles, lower, upper; rng=rng)
     particles = [ParticleState(lhs[i, :]) for i in 1:n_particles]
 
     # Track global best
     theta_global_best = copy(particles[1].theta)
     Q_global_best = Inf
-    moments_global_best = fill(NaN, 4)
+    moments_global_best = fill(NaN, nm)
 
     # History tracking
-    history_theta = pso_config.save_history ? Matrix{Float64}(undef, pso_config.max_iterations, 4) : nothing
+    history_theta = pso_config.save_history ? Matrix{Float64}(undef, pso_config.max_iterations, np) : nothing
     history_objective = pso_config.save_history ? Vector{Float64}(undef, pso_config.max_iterations) : nothing
 
     # Convergence tracking
@@ -277,14 +284,11 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
             if particles[p].objective_best < Q_global_best
                 Q_global_best = particles[p].objective_best
                 theta_global_best = copy(particles[p].theta_best)
-                # Re-evaluate to get moments at global best
-                # (use the cached result from the particle that just improved)
             end
         end
 
         # Get moments at global best (from the particle that holds it)
         best_p = argmin([particles[p].objective_best for p in 1:n_particles])
-        # Re-evaluate at best to get moments (only if improved this iteration)
         if particles[best_p].objective_best == Q_global_best
             best_result = smm_objective(
                 theta_global_best, config, grids, shocks,
@@ -295,8 +299,8 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
 
         # 3. Update velocities and positions
         for p in 1:n_particles
-            r1 = rand(rng, 4)
-            r2 = rand(rng, 4)
+            r1 = rand(rng, np)
+            r2 = rand(rng, np)
             particles[p].velocity = (
                 pso_config.w_inertia .* particles[p].velocity
                 .+ pso_config.c_cognitive .* r1 .* (particles[p].theta_best .- particles[p].theta)
@@ -304,8 +308,8 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
             )
             particles[p].theta = clamp.(
                 particles[p].theta .+ particles[p].velocity,
-                config.lower_bounds,
-                config.upper_bounds
+                lower,
+                upper
             )
         end
 
@@ -314,8 +318,8 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
             n_reassign = max(1, round(Int, pso_config.reassign_fraction * n_particles))
             sorted_indices = sortperm([particles[p].objective_best for p in 1:n_particles], rev=true)
             for p in sorted_indices[1:n_reassign]
-                particles[p].theta = config.lower_bounds .+ rand(rng, 4) .* (config.upper_bounds .- config.lower_bounds)
-                particles[p].velocity = zeros(4)
+                particles[p].theta = lower .+ rand(rng, np) .* (upper .- lower)
+                particles[p].velocity = zeros(np)
                 # Clear warm-start cache (new position may be far from old)
                 particles[p].V_cache = nothing
                 particles[p].I_cache = nothing
@@ -327,7 +331,6 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
         end
 
         # 5. Convergence check
-        # Track improvement
         iter_time = time() - iter_start
 
         if iter == 1 || Q_global_best < (pso_config.save_history ?
@@ -343,26 +346,21 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
             history_objective[iter] = Q_global_best
         end
 
-        # 7. Logging
+        # 7. Logging (dynamic format)
         if pso_config.verbose
-            @printf("PSO %3d | Q=%.4e | F=[%.3f,%.3f] phi=[%.3f,%.3f] | m=[%.4f,%.4f,%.4f,%.4f] | Conv=%d/%d | %.1fs\n",
-                    iter, Q_global_best,
-                    theta_global_best[1], theta_global_best[2],
-                    theta_global_best[3], theta_global_best[4],
-                    moments_global_best[1], moments_global_best[2],
-                    moments_global_best[3], moments_global_best[4],
-                    n_converged, n_particles,
-                    iter_time)
+            param_str = join([@sprintf("%.3f", theta_global_best[i]) for i in 1:np], ",")
+            moment_str = join([@sprintf("%.4f", moments_global_best[i]) for i in 1:nm], ",")
+            @printf("PSO %3d | Q=%.4e | theta=[%s] | m=[%s] | Conv=%d/%d | %.1fs\n",
+                    iter, Q_global_best, param_str, moment_str,
+                    n_converged, n_particles, iter_time)
         end
 
         # Append to log file
         open(log_file, "a") do io
-            @printf(io, "%d,%.8e,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.2f\n",
-                    iter, Q_global_best,
-                    theta_global_best[1], theta_global_best[2],
-                    theta_global_best[3], theta_global_best[4],
-                    moments_global_best[1], moments_global_best[2],
-                    moments_global_best[3], moments_global_best[4],
+            param_vals = join([@sprintf("%.6f", theta_global_best[i]) for i in 1:np], ",")
+            moment_vals = join([@sprintf("%.6f", moments_global_best[i]) for i in 1:nm], ",")
+            @printf(io, "%d,%.8e,%s,%s,%d,%.2f\n",
+                    iter, Q_global_best, param_vals, moment_vals,
                     n_converged, iter_time)
         end
 
@@ -395,10 +393,17 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
         @printf("PSO complete: %d iterations, %d evaluations, %.1f seconds\n",
                 actual_iterations, total_evals, elapsed)
         @printf("Best Q = %.6e\n", Q_global_best)
-        @printf("Best theta: F_begin=%.4f, F_mid=%.4f, phi_begin=%.4f, phi_mid=%.4f\n",
-                theta_global_best...)
-        @printf("Moments (sim): [%.4f, %.4f, %.4f, %.4f]\n", moments_global_best...)
-        @printf("Moments (data): [%.4f, %.4f, %.4f, %.4f]\n", config.m_data...)
+        # Dynamic parameter printing
+        println("Best theta:")
+        for (i, pname) in enumerate(spec.param_names)
+            @printf("  %-16s = %.4f\n", string(pname), theta_global_best[i])
+        end
+        mnames = moment_names(spec)
+        println("Moments (sim vs data):")
+        for (i, mname) in enumerate(mnames)
+            @printf("  %-20s sim=%.4f  data=%.4f\n", mname,
+                    moments_global_best[i], config.m_data[i])
+        end
         println("="^70)
     end
 
