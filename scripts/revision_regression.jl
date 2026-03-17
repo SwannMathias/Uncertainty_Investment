@@ -7,7 +7,7 @@ using Printf
 using NPZ
 using Distributed
 using DataFrames
-using CSV
+using Parquet2
 
 using Random
 
@@ -79,6 +79,6 @@ histories = simulate_firm_panel(
     T_years = 1000
 )
 panel = construct_estimation_panel(histories)
-save_simulation(joinpath(outdir,"panel_data_s11.csv"), panel)
+save_simulation(joinpath(outdir,"panel_data_s11.parquet"), panel)
 NPZ.npzwrite(joinpath(outdir,"I_policy_s11.npy"),sol_scenario1.I_policy)
 NPZ.npzwrite(joinpath(outdir,"Delta_I_policy_s11.npy"),sol_scenario1.Delta_I_policy)

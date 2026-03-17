@@ -9,7 +9,7 @@ Run with different thread counts to measure scaling:
     julia -t 4  scripts/benchmark_threading.jl
     julia -t 8  scripts/benchmark_threading.jl
 
-Results are saved to output/benchmarks/benchmark_results_<nthreads>t.csv
+Results are saved to output/benchmarks/benchmark_results_<nthreads>t.parquet
 """
 
 using Pkg
@@ -20,7 +20,7 @@ using UncertaintyInvestment
 using Random
 using Printf
 using DataFrames
-using CSV
+using Parquet2
 
 # ============================================================================
 # Setup
@@ -217,6 +217,6 @@ println("  >100% = superlinear (rare, usually cache effects)")
 # Save
 # ============================================================================
 
-outfile = joinpath(outdir, "benchmark_results_$(n_threads)t.csv")
-CSV.write(outfile, results)
+outfile = joinpath(outdir, "benchmark_results_$(n_threads)t.parquet")
+Parquet2.writefile(outfile, results)
 println("\nResults saved to: $outfile")
