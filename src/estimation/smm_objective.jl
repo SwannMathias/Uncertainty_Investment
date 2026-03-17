@@ -2,7 +2,7 @@
 SMM objective function: maps parameter vector theta to objective value Q(theta).
 
 # Pipeline
-theta -> adjustment costs -> ModelParameters -> VFI (with warm start) ->
+theta -> adjustment costs (via EstimationSpec) -> ModelParameters -> VFI (with warm start) ->
 simulate firms -> construct panel -> compute moments -> Q(theta)
 
 # Economic context
@@ -17,7 +17,7 @@ moments that can be compared to empirical targets.
 Mutable state for a single PSO particle, including warm-start cache.
 
 # Fields
-- `theta`: Current position in parameter space [F_begin, F_mid, phi_begin, phi_mid]
+- `theta`: Current position in parameter space
 - `velocity`: PSO velocity vector
 - `theta_best`: Best position found by this particle
 - `objective_best`: Best objective value found
@@ -48,11 +48,13 @@ end
     ParticleState(theta::Vector{Float64})
 
 Initialize a particle at position theta with zero velocity and no cache.
+Dimension-agnostic: velocity size matches theta length.
 """
 function ParticleState(theta::Vector{Float64})
+    n = length(theta)
     return ParticleState(
         copy(theta),
-        zeros(4),
+        zeros(n),
         copy(theta),
         Inf,
         nothing,
@@ -69,7 +71,7 @@ end
 Evaluate the SMM objective for a single parameter vector.
 
 # Arguments
-- `theta`: [F_begin, F_mid, phi_begin, phi_mid]
+- `theta`: Parameter vector (length = n_params(config.estimation_spec))
 - `config`: SMMConfig with calibration, simulation settings, and empirical targets
 - `grids`: Pre-constructed StateGrids (shared across evaluations)
 - `shocks`: Pre-generated ShockPanel (identical across all evaluations)
@@ -79,14 +81,14 @@ Evaluate the SMM objective for a single parameter vector.
 # Returns
 Named tuple: (objective, moments, V, I_policy, converged)
 - `objective`: Q(theta) = (m_sim - m_data)' W (m_sim - m_data), or Inf if VFI fails
-- `moments`: 4-element vector of simulated moments
+- `moments`: Vector of simulated moments (length = n_moments)
 - `V`: Value function array (for warm-starting next evaluation)
 - `I_policy`: Investment policy array
 - `converged`: Whether VFI converged
 
 # Economic interpretation
 Each evaluation:
-1. Constructs stage-specific CompositeAdjustmentCost from theta
+1. Constructs stage-specific adjustment costs from theta via EstimationSpec
 2. Solves the nested Bellman equation via VFI
 3. Simulates a panel of firms under the solved policy
 4. Computes moments from the simulated panel
@@ -96,17 +98,11 @@ function smm_objective(theta::Vector{Float64}, config::SMMConfig,
                        grids::StateGrids, shocks::ShockPanel,
                        V_init::Union{Nothing, Array{Float64,3}},
                        I_init::Union{Nothing, Array{Float64,3}})
-    # 1. Unpack parameters and construct adjustment costs
-    F_begin, F_mid, phi_begin, phi_mid = theta
+    spec = config.estimation_spec
+    nm = n_moments(spec)
 
-    ac_begin = CompositeAdjustmentCost([
-        FixedAdjustmentCost(F=F_begin),
-        ConvexAdjustmentCost(phi=phi_begin)
-    ])
-    ac_mid = CompositeAdjustmentCost([
-        FixedAdjustmentCost(F=F_mid),
-        ConvexAdjustmentCost(phi=phi_mid)
-    ])
+    # 1. Construct adjustment costs from theta via EstimationSpec
+    ac_begin, ac_mid = build_adjustment_costs(theta, spec)
 
     # 2. Build ModelParameters from calibration
     params = build_model_parameters(config.calibration)
@@ -120,7 +116,7 @@ function smm_objective(theta::Vector{Float64}, config::SMMConfig,
     catch e
         @warn "VFI failed for theta=$theta: $e"
         return (objective=Inf,
-                moments=fill(NaN, 4),
+                moments=fill(NaN, nm),
                 V=V_init,
                 I_policy=I_init,
                 converged=false)
@@ -132,7 +128,7 @@ function smm_objective(theta::Vector{Float64}, config::SMMConfig,
               "($(sol.convergence.iterations) iterations, " *
               "dist=$(sol.convergence.final_distance))"
         return (objective=Inf,
-                moments=fill(NaN, 4),
+                moments=fill(NaN, nm),
                 V=sol.V,
                 I_policy=sol.I_policy,
                 converged=false)
@@ -149,7 +145,7 @@ function smm_objective(theta::Vector{Float64}, config::SMMConfig,
     catch e
         @warn "Simulation failed for theta=$theta: $e"
         return (objective=Inf,
-                moments=fill(NaN, 4),
+                moments=fill(NaN, nm),
                 V=sol.V,
                 I_policy=sol.I_policy,
                 converged=true)

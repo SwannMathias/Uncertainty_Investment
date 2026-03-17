@@ -4,9 +4,12 @@ Tests for SMM estimation module.
 Tests cover:
 1. OLS correctness
 2. Revision transforms
-3. Moment computation from known panel data
-4. SMM objective pipeline (single evaluation)
-5. Warm-start speedup verification
+3. EstimationSpec construction and validation
+4. build_adjustment_costs correctness
+5. Moment computation from known panel data
+6. SMM objective pipeline (single evaluation)
+7. Warm-start speedup verification
+8. Convex-only spec single evaluation
 """
 
 using Pkg
@@ -104,13 +107,31 @@ end
         @test cal.n_K == 50
     end
 
-    @testset "SMMConfig defaults" begin
+    @testset "SMMConfig defaults (backward compat)" begin
         config = SMMConfig()
-        @test length(config.lower_bounds) == 4
-        @test length(config.upper_bounds) == 4
+        spec = config.estimation_spec
+        @test n_params(spec) == 4
+        @test n_moments(spec) == 4
         @test length(config.m_data) == 4
         @test size(config.W) == (4, 4)
         @test config.revision_transform == ASINH_TRANSFORM
+        @test spec.param_names == [:F_begin, :F_mid, :phi_begin, :phi_mid]
+    end
+
+    @testset "SMMConfig with convex_only_spec" begin
+        spec = convex_only_spec()
+        config = SMMConfig(estimation_spec=spec, m_data=[-0.15, 0.10])
+        @test n_params(config.estimation_spec) == 2
+        @test n_moments(config.estimation_spec) == 2
+        @test length(config.m_data) == 2
+        @test size(config.W) == (2, 2)
+    end
+
+    @testset "SMMConfig with fixed_only_spec" begin
+        spec = fixed_only_spec()
+        config = SMMConfig(estimation_spec=spec, m_data=[0.35, 0.50])
+        @test n_params(config.estimation_spec) == 2
+        @test n_moments(config.estimation_spec) == 2
     end
 
     @testset "build_model_parameters" begin
@@ -124,40 +145,166 @@ end
     end
 
     @testset "SMMConfig validation" begin
-        # Invalid bounds
+        # m_data length mismatch with spec
         @test_throws AssertionError SMMConfig(
-            lower_bounds = [1.0, 0.0, 0.0, 0.0],
-            upper_bounds = [0.0, 10.0, 20.0, 20.0]  # lower > upper
+            estimation_spec = convex_only_spec(),
+            m_data = [0.1, 0.2, 0.3]  # 3 values for 2-moment spec
         )
     end
 end
 
 # ============================================================================
-# Test 4: Latin Hypercube Sampling
+# Test 4: EstimationSpec Construction and Validation
 # ============================================================================
 
-@testset "Latin Hypercube Sampling" begin
-    rng = MersenneTwister(42)
-    lower = [0.0, 0.0, 0.0, 0.0]
-    upper = [10.0, 10.0, 20.0, 20.0]
-
-    samples = latin_hypercube_sample(20, lower, upper; rng=rng)
-
-    @test size(samples) == (20, 4)
-    # All samples within bounds
-    for j in 1:4
-        @test all(samples[:, j] .>= lower[j])
-        @test all(samples[:, j] .<= upper[j])
+@testset "EstimationSpec" begin
+    @testset "composite_spec" begin
+        spec = composite_spec()
+        @test n_params(spec) == 4
+        @test n_moments(spec) == 4
+        @test spec.param_names == [:F_begin, :F_mid, :phi_begin, :phi_mid]
+        @test length(spec.lower_bounds) == 4
+        @test length(spec.upper_bounds) == 4
+        @test all(spec.lower_bounds .<= spec.upper_bounds)
+        @test isnothing(spec.fixed_ac_begin)
+        @test isnothing(spec.fixed_ac_mid)
     end
-    # Good coverage: each dimension should span most of the range
-    for j in 1:4
-        range_covered = maximum(samples[:, j]) - minimum(samples[:, j])
-        @test range_covered > 0.5 * (upper[j] - lower[j])
+
+    @testset "convex_only_spec" begin
+        spec = convex_only_spec()
+        @test n_params(spec) == 2
+        @test n_moments(spec) == 2
+        @test spec.param_names == [:phi_begin, :phi_mid]
+        # All moments should be RegressionCoefficientMoment
+        @test all(m isa RegressionCoefficientMoment for m in spec.moments)
+    end
+
+    @testset "fixed_only_spec" begin
+        spec = fixed_only_spec()
+        @test n_params(spec) == 2
+        @test n_moments(spec) == 2
+        @test spec.param_names == [:F_begin, :F_mid]
+        # All moments should be ShareZeroMoment
+        @test all(m isa ShareZeroMoment for m in spec.moments)
+    end
+
+    @testset "identification check" begin
+        # More params than moments should fail
+        @test_throws AssertionError EstimationSpec(
+            [:a, :b, :c],
+            [
+                CostParameterMapping(:a, :begin, ConvexAdjustmentCost, :phi),
+                CostParameterMapping(:b, :mid, ConvexAdjustmentCost, :phi),
+                CostParameterMapping(:c, :begin, FixedAdjustmentCost, :F),
+            ],
+            [0.0, 0.0, 0.0],
+            [10.0, 10.0, 10.0],
+            AbstractMoment[ShareZeroMoment(:begin, "m1"), ShareZeroMoment(:mid, "m2")],  # only 2 moments for 3 params
+            nothing, nothing
+        )
+    end
+
+    @testset "moment_names" begin
+        spec = composite_spec()
+        mnames = moment_names(spec)
+        @test length(mnames) == 4
+        @test all(isa(mn, String) for mn in mnames)
     end
 end
 
 # ============================================================================
-# Test 5: Moment Computation with Synthetic Panel
+# Test 5: build_adjustment_costs
+# ============================================================================
+
+@testset "build_adjustment_costs" begin
+    @testset "composite_spec" begin
+        spec = composite_spec()
+        theta = [0.5, 1.0, 2.0, 3.0]  # F_begin, F_mid, phi_begin, phi_mid
+        ac_begin, ac_mid = build_adjustment_costs(theta, spec)
+
+        # Both stages should have CompositeAdjustmentCost (fixed + convex)
+        @test ac_begin isa CompositeAdjustmentCost
+        @test ac_mid isa CompositeAdjustmentCost
+
+        # Check that costs are non-zero for non-zero investment
+        K = 1.0
+        @test compute_cost(ac_begin, 0.1, 0.0, K) > 0.0
+        @test compute_cost(ac_mid, 0.0, 0.1, K) > 0.0
+    end
+
+    @testset "convex_only_spec" begin
+        spec = convex_only_spec()
+        theta = [2.0, 3.0]  # phi_begin, phi_mid
+        ac_begin, ac_mid = build_adjustment_costs(theta, spec)
+
+        # Should be ConvexAdjustmentCost (no composite wrapper for single component)
+        @test ac_begin isa ConvexAdjustmentCost
+        @test ac_mid isa ConvexAdjustmentCost
+
+        # Verify parameter values
+        @test ac_begin.phi == 2.0
+        @test ac_mid.phi == 3.0
+
+        # No fixed cost
+        @test !has_fixed_cost(ac_begin)
+        @test !has_fixed_cost(ac_mid)
+    end
+
+    @testset "fixed_only_spec" begin
+        spec = fixed_only_spec()
+        theta = [0.5, 1.0]  # F_begin, F_mid
+        ac_begin, ac_mid = build_adjustment_costs(theta, spec)
+
+        @test ac_begin isa FixedAdjustmentCost
+        @test ac_mid isa FixedAdjustmentCost
+        @test ac_begin.F == 0.5
+        @test ac_mid.F == 1.0
+    end
+
+    @testset "theta length mismatch" begin
+        spec = convex_only_spec()
+        @test_throws AssertionError build_adjustment_costs([1.0, 2.0, 3.0], spec)
+    end
+end
+
+# ============================================================================
+# Test 6: Latin Hypercube Sampling
+# ============================================================================
+
+@testset "Latin Hypercube Sampling" begin
+    rng = MersenneTwister(42)
+
+    @testset "4-dimensional (composite)" begin
+        lower = [0.0, 0.0, 0.0, 0.0]
+        upper = [10.0, 10.0, 20.0, 20.0]
+        samples = latin_hypercube_sample(20, lower, upper; rng=rng)
+
+        @test size(samples) == (20, 4)
+        for j in 1:4
+            @test all(samples[:, j] .>= lower[j])
+            @test all(samples[:, j] .<= upper[j])
+        end
+        for j in 1:4
+            range_covered = maximum(samples[:, j]) - minimum(samples[:, j])
+            @test range_covered > 0.5 * (upper[j] - lower[j])
+        end
+    end
+
+    @testset "2-dimensional (convex_only)" begin
+        lower = [0.0, 0.0]
+        upper = [20.0, 20.0]
+        samples = latin_hypercube_sample(20, lower, upper; rng=MersenneTwister(42))
+
+        @test size(samples) == (20, 2)
+        for j in 1:2
+            @test all(samples[:, j] .>= lower[j])
+            @test all(samples[:, j] .<= upper[j])
+        end
+    end
+end
+
+# ============================================================================
+# Test 7: Moment Computation with Synthetic Panel
 # ============================================================================
 
 @testset "Moment Computation - Synthetic" begin
@@ -211,22 +358,47 @@ end
         E_half = E_half
     )
 
-    config = SMMConfig()
+    @testset "composite_spec (4 moments)" begin
+        config = SMMConfig()
+        moments = compute_simulated_moments(df, config)
 
-    moments = compute_simulated_moments(df, config)
+        @test length(moments) == 4
+        @test all(isfinite.(moments))
+        # Share of zero should be between 0 and 1
+        @test 0.0 <= moments[1] <= 1.0
+        @test 0.0 <= moments[2] <= 1.0
+        # Regression coefficients should be finite
+        @test isfinite(moments[3])
+        @test isfinite(moments[4])
+    end
 
-    @test length(moments) == 4
-    @test all(isfinite.(moments))
-    # Share of zero should be between 0 and 1
-    @test 0.0 <= moments[1] <= 1.0
-    @test 0.0 <= moments[2] <= 1.0
-    # Regression coefficients should be finite
-    @test isfinite(moments[3])
-    @test isfinite(moments[4])
+    @testset "convex_only_spec (2 moments)" begin
+        spec = convex_only_spec()
+        config = SMMConfig(estimation_spec=spec, m_data=[-0.15, 0.10])
+        moments = compute_simulated_moments(df, config)
+
+        @test length(moments) == 2
+        @test all(isfinite.(moments))
+        # Both should be regression coefficients
+        @test isfinite(moments[1])
+        @test isfinite(moments[2])
+    end
+
+    @testset "fixed_only_spec (2 moments)" begin
+        spec = fixed_only_spec()
+        config = SMMConfig(estimation_spec=spec, m_data=[0.35, 0.50])
+        moments = compute_simulated_moments(df, config)
+
+        @test length(moments) == 2
+        @test all(isfinite.(moments))
+        # Both should be share-of-zero (between 0 and 1)
+        @test 0.0 <= moments[1] <= 1.0
+        @test 0.0 <= moments[2] <= 1.0
+    end
 end
 
 # ============================================================================
-# Test 6: SMM Objective (Single Evaluation)
+# Test 8: SMM Objective - Single Evaluation (backward compat)
 # ============================================================================
 
 @testset "SMM Objective - Single Evaluation" begin
@@ -287,23 +459,35 @@ end
 end
 
 # ============================================================================
-# Test 7: ParticleState
+# Test 9: ParticleState (dimension-agnostic)
 # ============================================================================
 
 @testset "ParticleState" begin
-    theta = [1.0, 2.0, 3.0, 4.0]
-    p = ParticleState(theta)
+    @testset "4-dimensional" begin
+        theta = [1.0, 2.0, 3.0, 4.0]
+        p = ParticleState(theta)
 
-    @test p.theta == theta
-    @test p.velocity == zeros(4)
-    @test p.objective_best == Inf
-    @test isnothing(p.V_cache)
-    @test isnothing(p.I_cache)
-    @test p.n_evaluations == 0
+        @test p.theta == theta
+        @test p.velocity == zeros(4)
+        @test length(p.velocity) == 4
+        @test p.objective_best == Inf
+        @test isnothing(p.V_cache)
+        @test isnothing(p.I_cache)
+        @test p.n_evaluations == 0
 
-    # Modify theta doesn't affect particle (deep copy)
-    theta[1] = 99.0
-    @test p.theta[1] == 1.0
+        # Modify theta doesn't affect particle (deep copy)
+        theta[1] = 99.0
+        @test p.theta[1] == 1.0
+    end
+
+    @testset "2-dimensional" begin
+        theta = [1.0, 2.0]
+        p = ParticleState(theta)
+
+        @test p.theta == theta
+        @test p.velocity == zeros(2)
+        @test length(p.velocity) == 2
+    end
 end
 
 println("\nAll SMM tests completed!")
