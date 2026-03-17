@@ -49,8 +49,8 @@ Simulate single firm given shock paths.
 
 # Arguments
 - `sol`: SolvedModel object
-- `D_path`: Log demand path (semesters)
-- `sigma_path`: Log volatility path (semesters)
+- `D_path`: Demand path in native space (semesters)
+- `sigma_path`: Volatility path in native space (semesters)
 - `K_init`: Initial capital stock
 - `T_years`: Number of years to simulate
 
@@ -101,18 +101,18 @@ function simulate_firm(sol::SolvedModel, D_path::Vector{Float64}, sigma_path::Ve
 
         # Current state
         K_current = K[year]
-        log_D = D_path[sem1]
-        log_sigma = sigma_path[sem1]
-        D_level = exp(log_D)
-        sigma_level = exp(log_sigma)
+        D_native = D_path[sem1]       # Value in process's native space
+        sigma_native = sigma_path[sem1]
+        D_level = grids.sv.D_space == :log ? exp(D_native) : D_native
+        sigma_level = grids.sv.sigma_space == :log ? exp(sigma_native) : sigma_native
 
         # Store first semester states
         D_first[year] = D_level
         sigma_first[year] = sigma_level
 
-        # Find nearest grid points for (D, sigma)
-        i_D = argmin(abs.(grids.sv.D_grid .- log_D))
-        i_sigma = argmin(abs.(grids.sv.sigma_grid .- log_sigma))
+        # Find nearest grid points (compare in native space)
+        i_D = argmin(abs.(grids.sv.D_grid .- D_native))
+        i_sigma = argmin(abs.(grids.sv.sigma_grid .- sigma_native))
 
         # Interpolate policy function for initial investment
         I = interpolate_policy(grids, sol.I_policy, K_current, i_D, i_sigma)
@@ -122,18 +122,18 @@ function simulate_firm(sol::SolvedModel, D_path::Vector{Float64}, sigma_path::Ve
         K_prime = (1 - derived.delta_semester) * K_current + I
 
         # Mid-year shocks
-        log_D_half = D_path[sem2]
-        log_sigma_half = sigma_path[sem2]
-        D_half_level = exp(log_D_half)
-        sigma_half_level = exp(log_sigma_half)
+        D_half_native = D_path[sem2]
+        sigma_half_native = sigma_path[sem2]
+        D_half_level = grids.sv.D_space == :log ? exp(D_half_native) : D_half_native
+        sigma_half_level = grids.sv.sigma_space == :log ? exp(sigma_half_native) : sigma_half_native
 
         # Store second semester states
         D_second[year] = D_half_level
         sigma_second[year] = sigma_half_level
 
-        # Find nearest grid points for mid-year states
-        i_D_half = argmin(abs.(grids.sv.D_grid .- log_D_half))
-        i_sigma_half = argmin(abs.(grids.sv.sigma_grid .- log_sigma_half))
+        # Find nearest grid points for mid-year states (compare in native space)
+        i_D_half = argmin(abs.(grids.sv.D_grid .- D_half_native))
+        i_sigma_half = argmin(abs.(grids.sv.sigma_grid .- sigma_half_native))
 
         # Stage-1 policy is now solved directly in VFI; interpolate it at (K_prime, D_half, sigma_half)
         if has_delta_policy_3d

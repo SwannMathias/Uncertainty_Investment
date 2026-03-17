@@ -2,35 +2,84 @@
     DemandProcess
 
 Autoregressive demand process parameters at semester frequency.
-Log demand evolves as: log D_{s+1/2} = mu_D(1-rho_D) + rho_D log D_s + sigma_s epsilon_{s+1/2}
+
+When `process_space = :log` (default):
+    log D_{s+½} = μ_D(1-ρ_D) + ρ_D log D_s + σ_s ε_{s+½}
+
+When `process_space = :level`:
+    D_{s+½} = μ_D(1-ρ_D) + ρ_D D_s + σ_s ε_{s+½}
+
+In both cases, μ_D is the long-run mean of the variable in the chosen space.
 """
 @with_kw struct DemandProcess
-    mu_D::Float64 = 0.0       # Long-run mean of log demand
+    mu_D::Float64 = 0.0       # Long-run mean (of log demand if :log, of demand level if :level)
     rho_D::Float64 = 0.9       # Persistence (semester)
+    process_space::Symbol = :log  # :log or :level
 
-    function DemandProcess(mu_D, rho_D)
+    function DemandProcess(mu_D, rho_D, process_space)
         @assert 0.0 <= rho_D < 1.0 "rho_D must be in [0, 1)"
-        new(mu_D, rho_D)
+        @assert process_space in (:log, :level) "process_space must be :log or :level"
+        new(mu_D, rho_D, process_space)
     end
 end
 
 """
-    VolatilityProcess
+    AbstractVolatilitySpec
+
+Abstract supertype for volatility process specifications.
+Concrete subtypes: `VolatilityProcess` (continuous AR(1)), `TwoStateVolatility` (Markov switching).
+"""
+abstract type AbstractVolatilitySpec end
+
+"""
+    VolatilityProcess <: AbstractVolatilitySpec
 
 Stochastic volatility process parameters at semester frequency.
-Log volatility evolves as: log sigma_{s+1/2} = sigma_bar(1-rho_sigma) + rho_sigma log sigma_s + sigma_eta eta_{s+1/2}
+
+When `process_space = :log` (default):
+    log σ_{s+½} = σ̄(1-ρ_σ) + ρ_σ log σ_s + σ_η η_{s+½}
+
+When `process_space = :level`:
+    σ_{s+½} = σ̄(1-ρ_σ) + ρ_σ σ_s + σ_η η_{s+½}
 """
-@with_kw struct VolatilityProcess
-    sigma_bar::Float64 = log(0.1)    # Long-run mean of log volatility
+@with_kw struct VolatilityProcess <: AbstractVolatilitySpec
+    sigma_bar::Float64 = log(0.1)    # Long-run mean (of log vol if :log, of vol level if :level)
     rho_sigma::Float64 = 0.95      # Persistence (semester)
     sigma_eta::Float64 = 0.1       # Volatility of volatility
     rho_epsilon_eta::Float64 = 0.0      # Correlation between demand and volatility shocks
+    process_space::Symbol = :log    # :log or :level
 
-    function VolatilityProcess(sigma_bar, rho_sigma, sigma_eta, rho_epsilon_eta)
+    function VolatilityProcess(sigma_bar, rho_sigma, sigma_eta, rho_epsilon_eta, process_space)
         @assert 0.0 <= rho_sigma < 1.0 "rho_sigma must be in [0, 1)"
         @assert sigma_eta > 0.0 "sigma_eta must be positive"
         @assert -1.0 <= rho_epsilon_eta <= 1.0 "rho_epsilon_eta must be in [-1, 1]"
-        new(sigma_bar, rho_sigma, sigma_eta, rho_epsilon_eta)
+        @assert process_space in (:log, :level) "process_space must be :log or :level"
+        new(sigma_bar, rho_sigma, sigma_eta, rho_epsilon_eta, process_space)
+    end
+end
+
+"""
+    TwoStateVolatility <: AbstractVolatilitySpec
+
+Two-state Markov switching volatility process.
+
+Volatility alternates between two states with transition matrix Pi_sigma.
+The `sigma_levels` are interpreted according to `process_space`:
+- `:level` (default): values are demand innovation standard deviations directly
+- `:log`: values are log-volatilities (exponentiated to get std devs)
+"""
+@with_kw struct TwoStateVolatility <: AbstractVolatilitySpec
+    sigma_levels::Vector{Float64}      # Two volatility values [σ_low, σ_high]
+    Pi_sigma::Matrix{Float64}          # 2×2 transition matrix
+    process_space::Symbol = :level     # :log or :level
+
+    function TwoStateVolatility(sigma_levels, Pi_sigma, process_space)
+        @assert length(sigma_levels) == 2 "sigma_levels must have exactly 2 elements"
+        @assert size(Pi_sigma) == (2, 2) "Pi_sigma must be a 2×2 matrix"
+        @assert all(isapprox.(sum(Pi_sigma, dims=2), 1.0, atol=1e-10)) "Pi_sigma rows must sum to 1"
+        @assert all(Pi_sigma .>= 0.0) "Pi_sigma entries must be non-negative"
+        @assert process_space in (:log, :level) "process_space must be :log or :level"
+        new(sigma_levels, Pi_sigma, process_space)
     end
 end
 
@@ -92,7 +141,7 @@ Main parameter structure containing all model primitives.
 
     # Stochastic processes
     demand::DemandProcess = DemandProcess()
-    volatility::VolatilityProcess = VolatilityProcess()
+    volatility::AbstractVolatilitySpec = VolatilityProcess()
 
     # Numerical settings
     numerical::NumericalSettings = NumericalSettings()
@@ -151,8 +200,8 @@ function get_derived_parameters(p::ModelParameters)
     # Note: The (1-gamma) terms cancel when taking derivative of profit function:
     #   pi(K,D) = (h/(1-gamma)) * D^gamma * K^(1-gamma)
     #   dpi/dK = (h/(1-gamma)) * (1-gamma) * D^gamma * K^(-gamma) = h * D^gamma * K^(-gamma)
-    # With D_ss = exp(mu_D), solve for K_ss
-    D_ss = exp(p.demand.mu_D)
+    # With D_ss = exp(mu_D) for :log space, or D_ss = mu_D for :level space
+    D_ss = p.demand.process_space == :log ? exp(p.demand.mu_D) : p.demand.mu_D
     user_cost = p.delta  + (1/p.beta-1)  # r = (1/beta - 1)
 
     # MPK = h * D^gamma * K^(-gamma)
@@ -211,14 +260,27 @@ function print_parameters(p::ModelParameters)
     println("  beta (annual discount)    = $(p.beta)")
 
     println("\nDemand Process (semester frequency):")
-    println("  mu_D (mean log demand)  = $(p.demand.mu_D)")
+    space_label_D = p.demand.process_space == :log ? "log demand" : "demand level"
+    println("  mu_D (mean $space_label_D)  = $(p.demand.mu_D)")
     println("  rho_D (persistence)      = $(p.demand.rho_D)")
+    println("  process_space            = $(p.demand.process_space)")
 
     println("\nVolatility Process (semester frequency):")
-    println("  sigma_bar (mean log vol)       = $(p.volatility.sigma_bar)")
-    println("  rho_sigma (persistence)      = $(p.volatility.rho_sigma)")
-    println("  sigma_eta (vol of vol)       = $(p.volatility.sigma_eta)")
-    println("  rho_epsilon_eta (correlation)     = $(p.volatility.rho_epsilon_eta)")
+    if p.volatility isa VolatilityProcess
+        space_label_vol = p.volatility.process_space == :log ? "log vol" : "vol level"
+        println("  Type: Continuous AR(1)")
+        println("  sigma_bar (mean $space_label_vol)       = $(p.volatility.sigma_bar)")
+        println("  rho_sigma (persistence)      = $(p.volatility.rho_sigma)")
+        println("  sigma_eta (vol of vol)       = $(p.volatility.sigma_eta)")
+        println("  rho_epsilon_eta (correlation)     = $(p.volatility.rho_epsilon_eta)")
+        println("  process_space                = $(p.volatility.process_space)")
+    elseif p.volatility isa TwoStateVolatility
+        space_label_vol = p.volatility.process_space == :log ? "log" : "level"
+        println("  Type: Two-state Markov switching")
+        println("  sigma_levels ($space_label_vol)  = $(p.volatility.sigma_levels)")
+        println("  Pi_sigma                     = $(p.volatility.Pi_sigma)")
+        println("  process_space                = $(p.volatility.process_space)")
+    end
 
     println("\nDerived Parameters:")
     println("  gamma (profit exponent)    = $(round(derived.gamma, digits=4))")

@@ -95,8 +95,8 @@ function precompute_profits(K_grid::Vector{Float64}, sv::SVDiscretization,
     h = derived.h
     h_scaled = h / (1 - gamma)  # Pre-compute the constant factor
 
-    # Pre-compute D levels (convert from log to level)
-    D_levels = exp.(sv.D_grid)
+    # Get D levels for profit computation (handles :log vs :level space)
+    D_levels = get_D_levels(sv)
 
     # Vectorized computation using broadcasting
     # π(K, D) = (h / (1-γ)) * D^γ * K^(1-γ)
@@ -182,29 +182,37 @@ get_K(grids::StateGrids, i_K::Int) = grids.K_grid[i_K]
     get_log_D(grids::StateGrids, i_D::Int) -> Float64
 
 Get log demand at index i_D.
+When D_space is :log, returns grid value directly. When :level, returns log of grid value.
 """
-get_log_D(grids::StateGrids, i_D::Int) = grids.sv.D_grid[i_D]
+get_log_D(grids::StateGrids, i_D::Int) =
+    grids.sv.D_space == :log ? grids.sv.D_grid[i_D] : log(grids.sv.D_grid[i_D])
 
 """
     get_D(grids::StateGrids, i_D::Int) -> Float64
 
 Get demand level (not log) at index i_D.
+When D_space is :log, returns exp(grid value). When :level, returns grid value directly.
 """
-get_D(grids::StateGrids, i_D::Int) = exp(grids.sv.D_grid[i_D])
+get_D(grids::StateGrids, i_D::Int) =
+    grids.sv.D_space == :log ? exp(grids.sv.D_grid[i_D]) : grids.sv.D_grid[i_D]
 
 """
     get_log_sigma(grids::StateGrids, i_sigma::Int) -> Float64
 
 Get log volatility at index i_sigma.
+When sigma_space is :log, returns grid value directly. When :level, returns log of grid value.
 """
-get_log_sigma(grids::StateGrids, i_sigma::Int) = grids.sv.sigma_grid[i_sigma]
+get_log_sigma(grids::StateGrids, i_sigma::Int) =
+    grids.sv.sigma_space == :log ? grids.sv.sigma_grid[i_sigma] : log(grids.sv.sigma_grid[i_sigma])
 
 """
     get_sigma(grids::StateGrids, i_sigma::Int) -> Float64
 
 Get volatility level (not log) at index i_sigma.
+When sigma_space is :log, returns exp(grid value). When :level, returns grid value directly.
 """
-get_sigma(grids::StateGrids, i_sigma::Int) = exp(grids.sv.sigma_grid[i_sigma])
+get_sigma(grids::StateGrids, i_sigma::Int) =
+    grids.sv.sigma_space == :log ? exp(grids.sv.sigma_grid[i_sigma]) : grids.sv.sigma_grid[i_sigma]
 
 """
     get_joint_state_index(grids::StateGrids, i_D::Int, i_sigma::Int) -> Int
@@ -474,20 +482,20 @@ function print_grid_info(grids::StateGrids)
     println("  K[1] = $(round(grids.K_grid[1], digits=4))")
     println("  K[end] = $(round(grids.K_grid[end], digits=4))")
 
-    println("\nDemand Grid (log):")
+    println("\nDemand Grid ($(grids.sv.D_space) space):")
     println("  Points: $(grids.n_D)")
     println("  Range: [$(round(grids.sv.D_grid[1], digits=4)), $(round(grids.sv.D_grid[end], digits=4))]")
 
     println("\nDemand Grid (level):")
-    D_levels = exp.(grids.sv.D_grid)
+    D_levels = get_D_levels(grids.sv)
     println("  Range: [$(round(D_levels[1], digits=4)), $(round(D_levels[end], digits=4))]")
 
-    println("\nVolatility Grid (log):")
+    println("\nVolatility Grid ($(grids.sv.sigma_space) space):")
     println("  Points: $(grids.n_sigma)")
     println("  Range: [$(round(grids.sv.sigma_grid[1], digits=4)), $(round(grids.sv.sigma_grid[end], digits=4))]")
 
     println("\nVolatility Grid (level):")
-    sigma_levels = exp.(grids.sv.sigma_grid)
+    sigma_levels = get_sigma_levels(grids.sv)
     println("  Range: [$(round(sigma_levels[1], digits=4)), $(round(sigma_levels[end], digits=4))]")
 
     println("\nTotal State Space:")

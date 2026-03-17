@@ -295,10 +295,10 @@ function export_to_parquet(sol::SolvedModel, output_dir::String)
     df_dv = DataFrame(
         i_D = repeat(1:sol.grids.n_D, outer=sol.grids.n_sigma),
         i_sigma = repeat(1:sol.grids.n_sigma, inner=sol.grids.n_D),
-        log_D = repeat(sol.grids.sv.D_grid, outer=sol.grids.n_sigma),
-        log_sigma = repeat(sol.grids.sv.sigma_grid, inner=sol.grids.n_D),
-        D = exp.(repeat(sol.grids.sv.D_grid, outer=sol.grids.n_sigma)),
-        sigma = exp.(repeat(sol.grids.sv.sigma_grid, inner=sol.grids.n_D))
+        grid_D = repeat(sol.grids.sv.D_grid, outer=sol.grids.n_sigma),
+        grid_sigma = repeat(sol.grids.sv.sigma_grid, inner=sol.grids.n_D),
+        D = repeat(get_D_levels(sol.grids.sv), outer=sol.grids.n_sigma),
+        sigma = repeat(get_sigma_levels(sol.grids.sv), inner=sol.grids.n_D)
     )
     Parquet2.writefile(dv_file, df_dv)
 
