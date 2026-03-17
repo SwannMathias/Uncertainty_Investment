@@ -195,33 +195,83 @@ end
 """
     SMMConfig(; kwargs...)
 
-Construct SMMConfig with defaults. Uses `composite_spec()` for backward compatibility.
+Construct SMMConfig with a dict-based interface for specifying fixed vs estimated parameters.
 
-Bounds are taken from the estimation_spec by default. Pass explicit `m_data`
-and `W` sized to match the spec's moment count.
+The cost structure is always composite (FixedAdjustmentCost + ConvexAdjustmentCost
+at each stage). Use `fixed_params` and `estimated_params` to control which of the
+4 parameters `{F_begin, F_mid, phi_begin, phi_mid}` are held constant vs optimized.
+
+# Dict-based interface (recommended)
+```julia
+config = SMMConfig(
+    fixed_params = Dict(:F_begin => 0.5, :F_mid => 0.5),
+    estimated_params = Dict(:phi_begin => (0.0, 20.0), :phi_mid => (0.0, 20.0)),
+    moments = [
+        RegressionCoefficientMoment(:begin,
+            @formula(revision_begin ~ log_sigma + log_K + log_D),
+            :log_sigma, "coef_begin_sigma"),
+        RegressionCoefficientMoment(:mid,
+            @formula(revision_mid ~ log_sigma_half + log_K + log_D),
+            :log_sigma_half, "coef_mid_sigma"),
+    ],
+    m_data = [-0.15, 0.10],
+)
+```
+
+# Direct spec interface (advanced)
+```julia
+config = SMMConfig(estimation_spec = my_custom_spec, m_data = [...])
+```
+
+# Default (backward compatible)
+`SMMConfig()` estimates all 4 parameters with the original 4 moments.
 """
 function SMMConfig(;
     calibration::FixedCalibration = FixedCalibration(),
-    estimation_spec::EstimationSpec = composite_spec(),
+    # Dict-based interface
+    fixed_params::Union{Nothing, Dict{Symbol,Float64}} = nothing,
+    estimated_params::Union{Nothing, Dict{Symbol,Tuple{Float64,Float64}}} = nothing,
+    moments::Union{Nothing, Vector{<:AbstractMoment}} = nothing,
+    # Direct spec interface (takes precedence if provided)
+    estimation_spec::Union{Nothing, EstimationSpec} = nothing,
+    # Moment targets and weighting
     m_data::Union{Nothing, Vector{Float64}} = nothing,
     W::Union{Nothing, Matrix{Float64}} = nothing,
+    # Simulation settings
     n_firms::Int = 1000,
     T_years::Int = 50,
     burn_in_years::Int = 30,
     shock_seed::Int = 42,
     revision_transform::RevisionTransform = ASINH_TRANSFORM,
-    zero_threshold::Float64 = 1e-4,
-    # Legacy keyword arguments for backward compatibility
-    lower_bounds::Union{Nothing, Vector{Float64}} = nothing,
-    upper_bounds::Union{Nothing, Vector{Float64}} = nothing
+    zero_threshold::Float64 = 1e-4
 )
-    nm = n_moments(estimation_spec)
+    # Determine the EstimationSpec
+    if !isnothing(estimation_spec)
+        # Direct spec provided — use as-is
+        spec = estimation_spec
+    elseif !isnothing(estimated_params)
+        # Dict-based interface
+        fp = isnothing(fixed_params) ? Dict{Symbol,Float64}() : fixed_params
+        if isnothing(moments)
+            error("When using dict-based interface (estimated_params), " *
+                  "you must also provide `moments`.")
+        end
+        spec = build_estimation_spec(
+            fixed_params = fp,
+            estimated_params = estimated_params,
+            moments = moments
+        )
+    else
+        # Default: all 4 parameters estimated (backward compatible)
+        spec = composite_spec()
+    end
 
-    # Default m_data: zeros for the spec's moment count
-    # For the composite_spec, use the original defaults
+    nm = n_moments(spec)
+
+    # Default m_data
     if isnothing(m_data)
         if nm == 4 && all(pn in (:F_begin, :F_mid, :phi_begin, :phi_mid)
-                          for pn in estimation_spec.param_names)
+                          for pn in spec.param_names)
             m_data = [0.35, 0.50, -0.15, 0.10]
         else
             m_data = zeros(nm)
@@ -233,7 +283,7 @@ function SMMConfig(;
         W = Matrix{Float64}(I, nm, nm)
     end
 
-    return SMMConfig(calibration, estimation_spec, m_data, W,
+    return SMMConfig(calibration, spec, m_data, W,
                      n_firms, T_years, burn_in_years, shock_seed,
                      revision_transform, zero_threshold)
 end

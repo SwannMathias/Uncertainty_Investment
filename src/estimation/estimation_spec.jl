@@ -316,6 +316,153 @@ function _wrap_costs(costs::Vector{AbstractAdjustmentCost})
 end
 
 # =============================================================================
+# Composite cost structure: canonical parameter definitions
+# =============================================================================
+
+"""
+    COMPOSITE_PARAM_DEFS
+
+Canonical mapping of parameter names to their cost type and stage in the
+composite adjustment cost structure (FixedAdjustmentCost + ConvexAdjustmentCost
+at each stage).
+
+Every parameter in the composite structure must appear here. The SMM framework
+always uses this composite structure — the user controls which parameters are
+estimated vs fixed.
+"""
+const COMPOSITE_PARAM_DEFS = Dict{Symbol, CostParameterMapping}(
+    :F_begin   => CostParameterMapping(:F_begin,   :begin, FixedAdjustmentCost,  :F),
+    :F_mid     => CostParameterMapping(:F_mid,     :mid,   FixedAdjustmentCost,  :F),
+    :phi_begin => CostParameterMapping(:phi_begin, :begin, ConvexAdjustmentCost, :phi),
+    :phi_mid   => CostParameterMapping(:phi_mid,   :mid,   ConvexAdjustmentCost, :phi),
+)
+
+"""
+Canonical ordering of parameters for deterministic theta layout.
+"""
+const COMPOSITE_PARAM_ORDER = [:F_begin, :F_mid, :phi_begin, :phi_mid]
+
+# =============================================================================
+# build_estimation_spec: dict-based interface
+# =============================================================================
+
+"""
+    build_estimation_spec(;
+        fixed_params::Dict{Symbol,Float64},
+        estimated_params::Dict{Symbol,Tuple{Float64,Float64}},
+        moments::Vector{<:AbstractMoment}
+    ) -> EstimationSpec
+
+Build an EstimationSpec from user-friendly dictionaries.
+
+The cost structure is always composite (FixedAdjustmentCost + ConvexAdjustmentCost
+at each stage). The user specifies which of the 4 parameters
+`{F_begin, F_mid, phi_begin, phi_mid}` are fixed (with values) vs estimated
+(with bounds). Moments are user-specified.
+
+# Arguments
+- `fixed_params`: Parameters held constant, e.g., `Dict(:F_begin => 0.5, :F_mid => 0.5)`
+- `estimated_params`: Parameters to optimize with `(lower, upper)` bounds,
+  e.g., `Dict(:phi_begin => (0.0, 20.0), :phi_mid => (0.0, 20.0))`
+- `moments`: Moments to compute from simulated data
+
+# Validation
+- All keys must be valid composite parameter names
+- `fixed_params` and `estimated_params` must not overlap
+- At least one parameter must be estimated
+- `length(moments) >= length(estimated_params)` (identification)
+
+# How fixed parameters enter the model
+Fixed parameters are used to construct non-estimated cost components
+(`fixed_ac_begin` / `fixed_ac_mid` in EstimationSpec). These are included
+in the composite cost at each stage alongside the estimated components.
+For example, if `F_begin = 0.5` is fixed and `phi_begin` is estimated,
+the beginning-of-year cost is:
+`CompositeAdjustmentCost([ConvexAdjustmentCost(phi=θ), FixedAdjustmentCost(F=0.5)])`
+
+# Example
+```julia
+spec = build_estimation_spec(
+    fixed_params = Dict(:F_begin => 0.5, :F_mid => 0.5),
+    estimated_params = Dict(:phi_begin => (0.0, 20.0), :phi_mid => (0.0, 20.0)),
+    moments = [
+        RegressionCoefficientMoment(:begin,
+            @formula(revision_begin ~ log_sigma + log_K + log_D),
+            :log_sigma, "coef_begin_sigma"),
+        RegressionCoefficientMoment(:mid,
+            @formula(revision_mid ~ log_sigma_half + log_K + log_D),
+            :log_sigma_half, "coef_mid_sigma"),
+    ]
+)
+```
+"""
+function build_estimation_spec(;
+    fixed_params::Dict{Symbol,Float64} = Dict{Symbol,Float64}(),
+    estimated_params::Dict{Symbol,Tuple{Float64,Float64}},
+    moments::Vector{<:AbstractMoment}
+)
+    valid_names = keys(COMPOSITE_PARAM_DEFS)
+
+    # Validate parameter names
+    for k in keys(fixed_params)
+        @assert k in valid_names "Unknown parameter :$k. Valid: $(join(valid_names, ", "))"
+    end
+    for k in keys(estimated_params)
+        @assert k in valid_names "Unknown parameter :$k. Valid: $(join(valid_names, ", "))"
+    end
+
+    # No overlap
+    overlap = intersect(keys(fixed_params), keys(estimated_params))
+    @assert isempty(overlap) "Parameters cannot be both fixed and estimated: $(overlap)"
+
+    # At least one estimated
+    @assert !isempty(estimated_params) "At least one parameter must be estimated"
+
+    # Build param_names and mappings in canonical order
+    param_names = Symbol[]
+    param_mappings = CostParameterMapping[]
+    lower_bounds = Float64[]
+    upper_bounds = Float64[]
+
+    for pname in COMPOSITE_PARAM_ORDER
+        if haskey(estimated_params, pname)
+            push!(param_names, pname)
+            push!(param_mappings, COMPOSITE_PARAM_DEFS[pname])
+            lb, ub = estimated_params[pname]
+            push!(lower_bounds, lb)
+            push!(upper_bounds, ub)
+        end
+    end
+
+    # Build fixed cost components from fixed_params, grouped by stage
+    # Collect fixed values by (stage, cost_type)
+    fixed_begin_costs = AbstractAdjustmentCost[]
+    fixed_mid_costs = AbstractAdjustmentCost[]
+
+    for pname in COMPOSITE_PARAM_ORDER
+        if haskey(fixed_params, pname)
+            mapping = COMPOSITE_PARAM_DEFS[pname]
+            fields = Dict{Symbol, Any}(mapping.field_name => fixed_params[pname])
+            ac = _construct_cost(mapping.cost_type, fields)
+            if mapping.stage == :begin
+                push!(fixed_begin_costs, ac)
+            else
+                push!(fixed_mid_costs, ac)
+            end
+        end
+    end
+
+    fixed_ac_begin = isempty(fixed_begin_costs) ? nothing :
+        (length(fixed_begin_costs) == 1 ? fixed_begin_costs[1] : CompositeAdjustmentCost(fixed_begin_costs))
+    fixed_ac_mid = isempty(fixed_mid_costs) ? nothing :
+        (length(fixed_mid_costs) == 1 ? fixed_mid_costs[1] : CompositeAdjustmentCost(fixed_mid_costs))
+
+    return EstimationSpec(param_names, param_mappings, lower_bounds, upper_bounds,
+                          AbstractMoment[m for m in moments],
+                          fixed_ac_begin, fixed_ac_mid)
+end
+
+# =============================================================================
 # Convenience constructors for common specifications
 # =============================================================================
 

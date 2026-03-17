@@ -11,25 +11,28 @@ Options (via command-line arguments):
     --n_particles N          Number of PSO particles (default: 20)
     --threads_per_particle N Threads per worker (default: 4)
     --max_iterations N       Maximum PSO iterations (default: 100)
-    --m_data "a,b,c,d"       Empirical moment targets (comma-separated, must match spec)
+    --m_data "a,b,..."       Empirical moment targets (comma-separated, must match moments)
     --output DIR             Output directory (default: output/estimation/run_001)
-    --config FILE            Load config from TOML file (overrides other options)
     --resume FILE            Resume from checkpoint file
     --seed N                 Shock generation seed (default: 42)
     --transform MODE         Revision transform: asinh, log, level_over_K (default: asinh)
-    --cost_spec SPEC         Cost specification: composite, convex_only, fixed_only (default: composite)
+    --fixed_params "F_begin=0.5,F_mid=0.5"       Parameters held constant
+    --estimated_params "phi_begin=0:20,phi_mid=0:20"  Parameters to estimate (name=lower:upper)
+
+If neither --fixed_params nor --estimated_params is given, all 4 parameters are estimated
+(backward compatible with original specification).
 
 Example (default 4-parameter composite):
     julia -t 1 scripts/run_smm.jl \\
         --n_particles 20 \\
-        --threads_per_particle 8 \\
         --max_iterations 100 \\
         --m_data "0.35,0.50,-0.15,0.10" \\
         --output output/estimation/run_001/
 
-Example (2-parameter convex-only):
+Example (convex only with fixed costs held constant):
     julia -t 1 scripts/run_smm.jl \\
-        --cost_spec convex_only \\
+        --fixed_params "F_begin=0.5,F_mid=0.5" \\
+        --estimated_params "phi_begin=0:20,phi_mid=0:20" \\
         --m_data "-0.15,0.10" \\
         --max_iterations 50 \\
         --output output/estimation/convex_run/
@@ -42,6 +45,7 @@ Pkg.activate(project_root)
 using UncertaintyInvestment
 using Printf
 using Random
+using StatsModels: @formula
 
 # ============================================================================
 # Argument parsing
@@ -80,17 +84,67 @@ function parse_transform(s::String)
     end
 end
 
-function parse_cost_spec(s::String)
-    s_lower = lowercase(s)
-    if s_lower == "composite"
-        return composite_spec()
-    elseif s_lower == "convex_only"
-        return convex_only_spec()
-    elseif s_lower == "fixed_only"
-        return fixed_only_spec()
-    else
-        error("Unknown cost_spec: $s. Use: composite, convex_only, or fixed_only")
+"""
+Parse "F_begin=0.5,F_mid=0.5" into Dict(:F_begin => 0.5, :F_mid => 0.5)
+"""
+function parse_fixed_params(s::String)
+    result = Dict{Symbol,Float64}()
+    for pair in split(s, ",")
+        k, v = split(strip(pair), "=")
+        result[Symbol(strip(k))] = parse(Float64, strip(v))
     end
+    return result
+end
+
+"""
+Parse "phi_begin=0:20,phi_mid=0:20" into Dict(:phi_begin => (0.0, 20.0), ...)
+"""
+function parse_estimated_params(s::String)
+    result = Dict{Symbol,Tuple{Float64,Float64}}()
+    for pair in split(s, ",")
+        k, bounds_str = split(strip(pair), "=")
+        lb, ub = split(strip(bounds_str), ":")
+        result[Symbol(strip(k))] = (parse(Float64, strip(lb)), parse(Float64, strip(ub)))
+    end
+    return result
+end
+
+"""
+Build default moments for estimated parameters.
+
+- If any F parameter is estimated, include ShareZeroMoment for its stage
+- If any phi parameter is estimated, include RegressionCoefficientMoment for its stage
+"""
+function default_moments_for_params(estimated_params::Dict{Symbol,Tuple{Float64,Float64}})
+    moments = AbstractMoment[]
+
+    # Share-of-zero moments for fixed cost parameters
+    if haskey(estimated_params, :F_begin)
+        push!(moments, ShareZeroMoment(:begin, "share_zero_begin"))
+    end
+    if haskey(estimated_params, :F_mid)
+        push!(moments, ShareZeroMoment(:mid, "share_zero_mid"))
+    end
+
+    # Regression moments for convex cost parameters
+    if haskey(estimated_params, :phi_begin)
+        push!(moments, RegressionCoefficientMoment(
+            :begin,
+            @formula(revision_begin ~ log_sigma + log_K + log_D),
+            :log_sigma,
+            "coef_begin_sigma"
+        ))
+    end
+    if haskey(estimated_params, :phi_mid)
+        push!(moments, RegressionCoefficientMoment(
+            :mid,
+            @formula(revision_mid ~ log_sigma_half + log_K + log_D),
+            :log_sigma_half,
+            "coef_mid_sigma"
+        ))
+    end
+
+    return moments
 end
 
 # ============================================================================
@@ -99,11 +153,6 @@ end
 
 function main()
     opts = parse_args(ARGS)
-
-    # Parse cost specification first (determines expected dimensions)
-    spec = parse_cost_spec(get(opts, "cost_spec", "composite"))
-    np = n_params(spec)
-    nm = n_moments(spec)
 
     # Parse options with defaults
     n_particles = parse(Int, get(opts, "n_particles", "20"))
@@ -120,18 +169,41 @@ function main()
         nothing  # Will use SMMConfig defaults
     end
 
-    if !isnothing(m_data)
-        @assert length(m_data) == nm "m_data must have exactly $nm values for $(get(opts, "cost_spec", "composite")) spec, got $(length(m_data))"
+    # Determine estimation spec from dict-based interface or default
+    if haskey(opts, "estimated_params")
+        ep = parse_estimated_params(opts["estimated_params"])
+        fp = haskey(opts, "fixed_params") ? parse_fixed_params(opts["fixed_params"]) : Dict{Symbol,Float64}()
+        moments = default_moments_for_params(ep)
+
+        nm = length(moments)
+        if !isnothing(m_data)
+            @assert length(m_data) == nm "m_data must have $nm values, got $(length(m_data))"
+        end
+
+        config = SMMConfig(
+            calibration = FixedCalibration(),
+            fixed_params = fp,
+            estimated_params = ep,
+            moments = moments,
+            m_data = m_data,
+            shock_seed = shock_seed,
+            revision_transform = transform
+        )
+    else
+        # Default: all 4 parameters estimated
+        if !isnothing(m_data)
+            @assert length(m_data) == 4 "Default spec has 4 moments, got $(length(m_data)) m_data values"
+        end
+
+        config = SMMConfig(
+            calibration = FixedCalibration(),
+            m_data = m_data,
+            shock_seed = shock_seed,
+            revision_transform = transform
+        )
     end
 
-    # Build configuration
-    config = SMMConfig(
-        calibration = FixedCalibration(),
-        estimation_spec = spec,
-        m_data = m_data,
-        shock_seed = shock_seed,
-        revision_transform = transform
-    )
+    spec = config.estimation_spec
 
     pso_config = PSOConfig(
         n_particles = n_particles,

@@ -22,6 +22,7 @@ using Random
 using Statistics
 using LinearAlgebra
 using DataFrames
+using StatsModels: @formula
 
 # ============================================================================
 # Test 1: OLS Correctness
@@ -487,6 +488,169 @@ end
         @test p.theta == theta
         @test p.velocity == zeros(2)
         @test length(p.velocity) == 2
+    end
+end
+
+# ============================================================================
+# Test 10: Dict-based SMMConfig interface
+# ============================================================================
+
+@testset "Dict-based SMMConfig" begin
+    @testset "Convex only with fixed F" begin
+        config = SMMConfig(
+            fixed_params = Dict(:F_begin => 0.5, :F_mid => 0.5),
+            estimated_params = Dict(:phi_begin => (0.0, 20.0), :phi_mid => (0.0, 20.0)),
+            moments = [
+                RegressionCoefficientMoment(:begin,
+                    @formula(revision_begin ~ log_sigma + log_K + log_D),
+                    :log_sigma, "coef_begin_sigma"),
+                RegressionCoefficientMoment(:mid,
+                    @formula(revision_mid ~ log_sigma_half + log_K + log_D),
+                    :log_sigma_half, "coef_mid_sigma"),
+            ],
+            m_data = [-0.15, 0.10],
+        )
+        spec = config.estimation_spec
+        @test n_params(spec) == 2
+        @test n_moments(spec) == 2
+        @test spec.param_names == [:phi_begin, :phi_mid]
+        @test length(config.m_data) == 2
+
+        # Fixed costs should be present
+        @test spec.fixed_ac_begin isa FixedAdjustmentCost
+        @test spec.fixed_ac_mid isa FixedAdjustmentCost
+        @test spec.fixed_ac_begin.F == 0.5
+        @test spec.fixed_ac_mid.F == 0.5
+
+        # build_adjustment_costs should produce CompositeAdjustmentCost
+        theta = [2.0, 3.0]
+        ac_begin, ac_mid = build_adjustment_costs(theta, spec)
+        @test ac_begin isa CompositeAdjustmentCost
+        @test ac_mid isa CompositeAdjustmentCost
+        @test has_fixed_cost(ac_begin)
+        @test has_fixed_cost(ac_mid)
+    end
+
+    @testset "Fixed only with convex held constant" begin
+        config = SMMConfig(
+            fixed_params = Dict(:phi_begin => 2.0, :phi_mid => 3.0),
+            estimated_params = Dict(:F_begin => (0.0, 10.0), :F_mid => (0.0, 10.0)),
+            moments = [
+                ShareZeroMoment(:begin, "share_zero_begin"),
+                ShareZeroMoment(:mid, "share_zero_mid"),
+            ],
+            m_data = [0.35, 0.50],
+        )
+        spec = config.estimation_spec
+        @test n_params(spec) == 2
+        @test spec.param_names == [:F_begin, :F_mid]
+
+        # Fixed convex costs should be present
+        @test spec.fixed_ac_begin isa ConvexAdjustmentCost
+        @test spec.fixed_ac_mid isa ConvexAdjustmentCost
+        @test spec.fixed_ac_begin.phi == 2.0
+        @test spec.fixed_ac_mid.phi == 3.0
+    end
+
+    @testset "Single parameter estimation" begin
+        config = SMMConfig(
+            fixed_params = Dict(:F_begin => 0.0, :F_mid => 0.0, :phi_mid => 2.0),
+            estimated_params = Dict(:phi_begin => (0.0, 20.0)),
+            moments = [
+                RegressionCoefficientMoment(:begin,
+                    @formula(revision_begin ~ log_sigma + log_K + log_D),
+                    :log_sigma, "coef_begin_sigma"),
+            ],
+            m_data = [-0.15],
+        )
+        spec = config.estimation_spec
+        @test n_params(spec) == 1
+        @test n_moments(spec) == 1
+        @test spec.param_names == [:phi_begin]
+    end
+
+    @testset "Validation: overlapping keys" begin
+        @test_throws AssertionError SMMConfig(
+            fixed_params = Dict(:F_begin => 0.5),
+            estimated_params = Dict(:F_begin => (0.0, 10.0)),  # overlap!
+            moments = [ShareZeroMoment(:begin, "m1")],
+            m_data = [0.35],
+        )
+    end
+
+    @testset "Validation: unknown parameter" begin
+        @test_throws AssertionError SMMConfig(
+            estimated_params = Dict(:phi_unknown => (0.0, 20.0)),
+            moments = [ShareZeroMoment(:begin, "m1")],
+            m_data = [0.35],
+        )
+    end
+
+    @testset "Backward compat: no dicts = composite_spec" begin
+        config = SMMConfig()
+        spec = config.estimation_spec
+        @test n_params(spec) == 4
+        @test n_moments(spec) == 4
+        @test spec.param_names == [:F_begin, :F_mid, :phi_begin, :phi_mid]
+    end
+end
+
+# ============================================================================
+# Test 11: build_estimation_spec
+# ============================================================================
+
+@testset "build_estimation_spec" begin
+    @testset "Canonical parameter ordering" begin
+        # Even if estimated_params keys are in non-canonical order,
+        # the resulting param_names should follow COMPOSITE_PARAM_ORDER
+        spec = build_estimation_spec(
+            estimated_params = Dict(:phi_mid => (0.0, 20.0), :F_begin => (0.0, 10.0)),
+            moments = [
+                ShareZeroMoment(:begin, "m1"),
+                RegressionCoefficientMoment(:mid,
+                    @formula(revision_mid ~ log_sigma_half + log_K + log_D),
+                    :log_sigma_half, "m2"),
+            ],
+        )
+        # F_begin comes before phi_mid in COMPOSITE_PARAM_ORDER
+        @test spec.param_names == [:F_begin, :phi_mid]
+    end
+
+    @testset "Empty fixed_params" begin
+        spec = build_estimation_spec(
+            estimated_params = Dict(:phi_begin => (0.0, 20.0), :phi_mid => (0.0, 20.0)),
+            moments = [
+                RegressionCoefficientMoment(:begin,
+                    @formula(revision_begin ~ log_sigma + log_K + log_D),
+                    :log_sigma, "m1"),
+                RegressionCoefficientMoment(:mid,
+                    @formula(revision_mid ~ log_sigma_half + log_K + log_D),
+                    :log_sigma_half, "m2"),
+            ],
+        )
+        @test isnothing(spec.fixed_ac_begin)
+        @test isnothing(spec.fixed_ac_mid)
+    end
+
+    @testset "Mixed stages in fixed_params" begin
+        spec = build_estimation_spec(
+            fixed_params = Dict(:F_begin => 0.5, :phi_mid => 3.0),
+            estimated_params = Dict(:F_mid => (0.0, 10.0), :phi_begin => (0.0, 20.0)),
+            moments = [
+                ShareZeroMoment(:mid, "m1"),
+                RegressionCoefficientMoment(:begin,
+                    @formula(revision_begin ~ log_sigma + log_K + log_D),
+                    :log_sigma, "m2"),
+            ],
+        )
+        # Begin stage: fixed F=0.5, estimated phi
+        @test spec.fixed_ac_begin isa FixedAdjustmentCost
+        @test spec.fixed_ac_begin.F == 0.5
+        # Mid stage: estimated F, fixed phi=3.0
+        @test spec.fixed_ac_mid isa ConvexAdjustmentCost
+        @test spec.fixed_ac_mid.phi == 3.0
+
+        @test spec.param_names == [:F_mid, :phi_begin]
     end
 end
 

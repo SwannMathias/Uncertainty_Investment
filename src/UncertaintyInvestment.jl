@@ -136,6 +136,7 @@ include("estimation/estimation_spec.jl")
 export EstimationSpec, AbstractMoment, ShareZeroMoment, RegressionCoefficientMoment
 export CostParameterMapping, build_adjustment_costs
 export composite_spec, convex_only_spec, fixed_only_spec
+export build_estimation_spec, COMPOSITE_PARAM_DEFS, COMPOSITE_PARAM_ORDER
 export n_params, n_moments, moment_names
 
 include("estimation/smm_config.jl")
