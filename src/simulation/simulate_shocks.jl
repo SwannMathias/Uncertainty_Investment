@@ -31,14 +31,26 @@ using Base.Threads: @threads, nthreads, threadid
     ShockPanel
 
 Container for simulated shock panel (demand and volatility paths for multiple firms).
+
+The `D` and `sigma` fields store values in the process's native space
+(as indicated by `D_space` and `sigma_space`). The `D_level` and `sigma_level`
+fields always store values in levels.
 """
 struct ShockPanel
     n_firms::Int
     T::Int                        # Length in semesters
-    D::Matrix{Float64}            # Log demand [firm, semester]
-    sigma::Matrix{Float64}            # Log volatility [firm, semester]
+    D::Matrix{Float64}            # Demand in native space [firm, semester]
+    sigma::Matrix{Float64}            # Volatility in native space [firm, semester]
     D_level::Matrix{Float64}      # Demand level [firm, semester]
     sigma_level::Matrix{Float64}      # Volatility level [firm, semester]
+    D_space::Symbol               # :log or :level
+    sigma_space::Symbol           # :log or :level
+end
+
+# Backward-compatible constructor (defaults to :log space)
+function ShockPanel(n_firms::Int, T::Int, D::Matrix{Float64}, sigma::Matrix{Float64},
+                    D_level::Matrix{Float64}, sigma_level::Matrix{Float64})
+    ShockPanel(n_firms, T, D, sigma, D_level, sigma_level, :log, :log)
 end
 
 """
@@ -90,17 +102,19 @@ end
 
 Simulate paths for demand and stochastic volatility jointly.
 
+Paths are simulated in the process's native space (`:log` or `:level`).
+
 # Arguments
 - `demand`: DemandProcess parameters
-- `vol`: VolatilityProcess parameters
+- `vol`: Volatility specification (VolatilityProcess or TwoStateVolatility)
 - `T`: Length of path (in semesters)
-- `D0`: Initial log demand (default: stationary mean)
-- `sigma0`: Initial log volatility (default: stationary mean)
+- `D0`: Initial value in native space (default: stationary mean)
+- `sigma0`: Initial value in native space (default: stationary mean)
 - `rng`: Random number generator
 
 # Returns
-- `D_path`: Log demand path (length T)
-- `sigma_path`: Log volatility path (length T)
+- `D_path`: Demand path in native space (length T)
+- `sigma_path`: Volatility path in native space (length T)
 """
 function simulate_sv_path(demand::DemandProcess, vol::VolatilityProcess, T::Int;
                          D0=nothing, sigma0=nothing, rng=Random.GLOBAL_RNG)
@@ -108,22 +122,12 @@ function simulate_sv_path(demand::DemandProcess, vol::VolatilityProcess, T::Int;
     D_path = zeros(T)
     sigma_path = zeros(T)
 
-    # Initial values
-    if isnothing(D0)
-        D_path[1] = demand.mu_D
-    else
-        D_path[1] = D0
-    end
-
-    if isnothing(sigma0)
-        sigma_path[1] = vol.sigma_bar
-    else
-        sigma_path[1] = sigma0
-    end
+    # Initial values (in native space)
+    D_path[1] = isnothing(D0) ? demand.mu_D : D0
+    sigma_path[1] = isnothing(sigma0) ? vol.sigma_bar : sigma0
 
     # Correlation structure
     if abs(vol.rho_epsilon_eta) > 1e-10
-        # Correlated shocks
         Sigma = [1.0 vol.rho_epsilon_eta; vol.rho_epsilon_eta 1.0]
         mvn = MvNormal(zeros(2), Sigma)
     else
@@ -132,24 +136,26 @@ function simulate_sv_path(demand::DemandProcess, vol::VolatilityProcess, T::Int;
 
     # Simulate
     for t in 2:T
-        # Current volatility level (for demand innovation)
-        sigma_current = exp(sigma_path[t-1])
+        # Get volatility level (demand innovation std dev)
+        if vol.process_space == :log
+            sigma_current = exp(sigma_path[t-1])
+        else
+            sigma_current = max(sigma_path[t-1], 1e-10)
+        end
 
         if isnothing(mvn)
-            # Independent shocks
             epsilon_D = randn(rng)
             epsilon_sigma = randn(rng)
         else
-            # Correlated shocks
             shocks = rand(rng, mvn)
             epsilon_D = shocks[1]
             epsilon_sigma = shocks[2]
         end
 
-        # Update demand (volatility affects demand innovation)
+        # Update demand in its native space
         D_path[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * D_path[t-1] + sigma_current * epsilon_D
 
-        # Update volatility
+        # Update volatility in its native space
         sigma_path[t] = vol.sigma_bar * (1 - vol.rho_sigma) + vol.rho_sigma * sigma_path[t-1] + vol.sigma_eta * epsilon_sigma
     end
 
@@ -157,7 +163,58 @@ function simulate_sv_path(demand::DemandProcess, vol::VolatilityProcess, T::Int;
 end
 
 """
-    generate_shock_panel(demand::DemandProcess, vol::VolatilityProcess,
+    simulate_sv_path(demand::DemandProcess, vol::TwoStateVolatility, T::Int;
+                     D0=nothing, sigma0=nothing, rng=Random.GLOBAL_RNG) -> (Vector, Vector)
+
+Simulate demand path with two-state Markov switching volatility.
+
+# Returns
+- `D_path`: Demand path in native space (length T)
+- `sigma_path`: Volatility path in native space (length T)
+"""
+function simulate_sv_path(demand::DemandProcess, vol::TwoStateVolatility, T::Int;
+                         D0=nothing, sigma0=nothing, rng=Random.GLOBAL_RNG)
+    D_path = zeros(T)
+    sigma_path = zeros(T)
+
+    # Initial demand value
+    D_path[1] = isnothing(D0) ? demand.mu_D : D0
+
+    # Initial volatility state (default: state 1)
+    if isnothing(sigma0)
+        sigma_state = 1
+    else
+        # Find closest state
+        sigma_state = argmin(abs.(vol.sigma_levels .- sigma0))
+    end
+    sigma_path[1] = vol.sigma_levels[sigma_state]
+
+    # Get volatility levels for demand innovations
+    if vol.process_space == :log
+        sigma_levels_for_demand = exp.(vol.sigma_levels)
+    else
+        sigma_levels_for_demand = vol.sigma_levels
+    end
+
+    for t in 2:T
+        # Transition volatility state
+        u = rand(rng)
+        sigma_state = u < vol.Pi_sigma[sigma_state, 1] ? 1 : 2
+        sigma_path[t] = vol.sigma_levels[sigma_state]
+
+        # Current demand innovation std dev
+        sigma_current = max(sigma_levels_for_demand[sigma_state], 1e-10)
+
+        # Update demand in its native space
+        epsilon_D = randn(rng)
+        D_path[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * D_path[t-1] + sigma_current * epsilon_D
+    end
+
+    return D_path, sigma_path
+end
+
+"""
+    generate_shock_panel(demand::DemandProcess, vol::AbstractVolatilitySpec,
                         n_firms::Int, T::Int;
                         burn_in::Int=100, rng=Random.GLOBAL_RNG,
                         use_parallel::Bool=false, seed::Union{Int,Nothing}=nothing) -> ShockPanel
@@ -166,7 +223,7 @@ Generate panel of shock paths for multiple firms.
 
 # Arguments
 - `demand`: DemandProcess parameters
-- `vol`: VolatilityProcess parameters
+- `vol`: Volatility specification (VolatilityProcess or TwoStateVolatility)
 - `n_firms`: Number of firms
 - `T`: Length of each path (in semesters)
 - `burn_in`: Number of initial periods to discard
@@ -183,7 +240,7 @@ When `use_parallel=true` and multiple threads are available:
 # Returns
 - ShockPanel object
 """
-function generate_shock_panel(demand::DemandProcess, vol::VolatilityProcess,
+function generate_shock_panel(demand::DemandProcess, vol::AbstractVolatilitySpec,
                              n_firms::Int, T::Int;
                              burn_in::Int=100, rng=Random.GLOBAL_RNG,
                              use_parallel::Bool=false, seed::Union{Int,Nothing}=nothing)
@@ -198,25 +255,27 @@ function generate_shock_panel(demand::DemandProcess, vol::VolatilityProcess,
     @assert T > 0 "T must be positive"
     @assert burn_in >= 0 "burn_in must be non-negative"
 
+    # Determine process spaces
+    D_space = demand.process_space
+    sigma_space = vol isa VolatilityProcess ? vol.process_space :
+                  vol isa TwoStateVolatility ? vol.process_space : :log
+
     # Allocate storage
-    D_log = zeros(n_firms, T)
-    sigma_log = zeros(n_firms, T)
+    D_native = zeros(n_firms, T)
+    sigma_native = zeros(n_firms, T)
 
     # Simulate each firm
     for i in 1:n_firms
-        # Simulate with burn-in
         D_full, sigma_full = simulate_sv_path(demand, vol, T + burn_in; rng=rng)
-
-        # Keep post-burn-in periods
-        D_log[i, :] = D_full[(burn_in+1):end]
-        sigma_log[i, :] = sigma_full[(burn_in+1):end]
+        D_native[i, :] = D_full[(burn_in+1):end]
+        sigma_native[i, :] = sigma_full[(burn_in+1):end]
     end
 
     # Convert to levels
-    D_level = exp.(D_log) # Add 
-    sigma_level = exp.(sigma_log)
+    D_level = D_space == :log ? exp.(D_native) : D_native
+    sigma_level = sigma_space == :log ? exp.(sigma_native) : sigma_native
 
-    return ShockPanel(n_firms, T, D_log, sigma_log, D_level, sigma_level)
+    return ShockPanel(n_firms, T, D_native, sigma_native, D_level, sigma_level, D_space, sigma_space)
 end
 
 """
@@ -310,7 +369,7 @@ end
 # ============================================================================
 
 """
-    generate_shock_panel_parallel(demand::DemandProcess, vol::VolatilityProcess,
+    generate_shock_panel_parallel(demand::DemandProcess, vol::AbstractVolatilitySpec,
                                   n_firms::Int, T::Int;
                                   burn_in::Int=100, seed::Union{Int,Nothing}=nothing) -> ShockPanel
 
@@ -335,7 +394,7 @@ When a seed is provided:
 
 # Arguments
 - `demand`: DemandProcess parameters
-- `vol`: VolatilityProcess parameters
+- `vol`: Volatility specification (VolatilityProcess or TwoStateVolatility)
 - `n_firms`: Number of firms
 - `T`: Length of each path (in semesters)
 - `burn_in`: Number of initial periods to discard
@@ -355,40 +414,39 @@ shocks = generate_shock_panel_parallel(
 # Results are identical regardless of thread count
 ```
 """
-function generate_shock_panel_parallel(demand::DemandProcess, vol::VolatilityProcess,
+function generate_shock_panel_parallel(demand::DemandProcess, vol::AbstractVolatilitySpec,
                                        n_firms::Int, T::Int;
                                        burn_in::Int=100, seed::Union{Int,Nothing}=nothing)
     @assert n_firms > 0 "n_firms must be positive"
     @assert T > 0 "T must be positive"
     @assert burn_in >= 0 "burn_in must be non-negative"
 
+    # Determine process spaces
+    D_space = demand.process_space
+    sigma_space = vol isa VolatilityProcess ? vol.process_space :
+                  vol isa TwoStateVolatility ? vol.process_space : :log
+
     # Determine seed base (use current time if no seed provided)
     seed_base = isnothing(seed) ? abs(rand(Int)) : seed
 
     # Allocate storage
-    D_log = zeros(n_firms, T)
-    sigma_log = zeros(n_firms, T)
+    D_native = zeros(n_firms, T)
+    sigma_native = zeros(n_firms, T)
 
     n_threads = nthreads()
 
     # Parallel generation with per-firm RNGs
     @threads for i in 1:n_firms
-        # Create a unique, deterministic RNG for this firm
-        # This ensures reproducibility regardless of thread assignment
         firm_rng = MersenneTwister(seed_base + i)
-
-        # Simulate with burn-in using firm-specific RNG
         D_full, sigma_full = simulate_sv_path(demand, vol, T + burn_in; rng=firm_rng)
-
-        # Keep post-burn-in periods
-        D_log[i, :] = D_full[(burn_in+1):end]
-        sigma_log[i, :] = sigma_full[(burn_in+1):end]
+        D_native[i, :] = D_full[(burn_in+1):end]
+        sigma_native[i, :] = sigma_full[(burn_in+1):end]
     end
 
     # Convert to levels
-    D_level = exp.(D_log)
-    sigma_level = exp.(sigma_log)
+    D_level = D_space == :log ? exp.(D_native) : D_native
+    sigma_level = sigma_space == :log ? exp.(sigma_native) : sigma_native
 
-    return ShockPanel(n_firms, T, D_log, sigma_log, D_level, sigma_level)
+    return ShockPanel(n_firms, T, D_native, sigma_native, D_level, sigma_level, D_space, sigma_space)
 end
 

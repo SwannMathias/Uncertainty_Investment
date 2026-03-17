@@ -53,7 +53,8 @@ using Base.Threads: @threads, nthreads, threadid
 # ============================================================================
 
 include("model/parameters.jl")
-export DemandProcess, VolatilityProcess, NumericalSettings, ModelParameters
+export DemandProcess, AbstractVolatilitySpec, VolatilityProcess, TwoStateVolatility
+export NumericalSettings, ModelParameters
 export DerivedParameters, get_derived_parameters
 export validate_parameters, print_parameters
 
@@ -75,6 +76,7 @@ export total_adjustment_cost
 include("model/stochastic_process.jl")
 export rouwenhorst, tauchen, SVDiscretization
 export discretize_sv_process, stationary_distribution, verify_discretization
+export get_D_levels, get_sigma_levels
 
 include("model/grids.jl")
 export StateGrids, PrecomputedProfits, construct_grids, precompute_profits

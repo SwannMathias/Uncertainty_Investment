@@ -43,12 +43,20 @@ struct FixedCalibration
     # Demand process (semester frequency)
     rho_D::Float64
     mu_D::Float64
+    demand_process_space::Symbol    # :log or :level
 
     # Volatility process (semester frequency)
     sigma_bar::Float64
     rho_sigma::Float64
     sigma_eta::Float64
     rho_epsilon_eta::Float64
+    vol_process_space::Symbol       # :log or :level
+
+    # Two-state volatility (alternative to continuous AR(1))
+    volatility_type::Symbol         # :continuous or :two_state
+    sigma_low::Float64              # Used when volatility_type == :two_state
+    sigma_high::Float64             # Used when volatility_type == :two_state
+    Pi_sigma_2state::Matrix{Float64} # Used when volatility_type == :two_state
 
     # Numerical settings for VFI
     n_K::Int
@@ -73,10 +81,16 @@ function FixedCalibration(;
     beta::Float64 = 0.96,
     rho_D::Float64 = 0.5,
     mu_D::Float64 = 0.0,
+    demand_process_space::Symbol = :log,
     sigma_bar::Float64 = log(0.1),
     rho_sigma::Float64 = 0.1,
     sigma_eta::Float64 = 0.1,
     rho_epsilon_eta::Float64 = 0.0,
+    vol_process_space::Symbol = :log,
+    volatility_type::Symbol = :continuous,
+    sigma_low::Float64 = 0.05,
+    sigma_high::Float64 = 0.15,
+    Pi_sigma_2state::Matrix{Float64} = [0.95 0.05; 0.05 0.95],
     n_K::Int = 50,
     n_D::Int = 15,
     n_sigma::Int = 7,
@@ -88,8 +102,9 @@ function FixedCalibration(;
 )
     return FixedCalibration(
         alpha, epsilon, delta, beta,
-        rho_D, mu_D,
-        sigma_bar, rho_sigma, sigma_eta, rho_epsilon_eta,
+        rho_D, mu_D, demand_process_space,
+        sigma_bar, rho_sigma, sigma_eta, rho_epsilon_eta, vol_process_space,
+        volatility_type, sigma_low, sigma_high, Pi_sigma_2state,
         n_K, n_D, n_sigma, K_min_factor, K_max_factor,
         tol_vfi, max_iter, howard_steps
     )
@@ -101,21 +116,37 @@ end
 Construct ModelParameters from a FixedCalibration struct.
 """
 function build_model_parameters(cal::FixedCalibration)
+    demand = DemandProcess(
+        mu_D = cal.mu_D,
+        rho_D = cal.rho_D,
+        process_space = cal.demand_process_space
+    )
+
+    if cal.volatility_type == :continuous
+        volatility = VolatilityProcess(
+            sigma_bar = cal.sigma_bar,
+            rho_sigma = cal.rho_sigma,
+            sigma_eta = cal.sigma_eta,
+            rho_epsilon_eta = cal.rho_epsilon_eta,
+            process_space = cal.vol_process_space
+        )
+    elseif cal.volatility_type == :two_state
+        volatility = TwoStateVolatility(
+            sigma_levels = [cal.sigma_low, cal.sigma_high],
+            Pi_sigma = cal.Pi_sigma_2state,
+            process_space = cal.vol_process_space
+        )
+    else
+        error("Unknown volatility_type: $(cal.volatility_type). Must be :continuous or :two_state.")
+    end
+
     return ModelParameters(
         alpha = cal.alpha,
         epsilon = cal.epsilon,
         delta = cal.delta,
         beta = cal.beta,
-        demand = DemandProcess(
-            mu_D = cal.mu_D,
-            rho_D = cal.rho_D
-        ),
-        volatility = VolatilityProcess(
-            sigma_bar = cal.sigma_bar,
-            rho_sigma = cal.rho_sigma,
-            sigma_eta = cal.sigma_eta,
-            rho_epsilon_eta = cal.rho_epsilon_eta
-        ),
+        demand = demand,
+        volatility = volatility,
         numerical = NumericalSettings(
             n_K = cal.n_K,
             n_D = cal.n_D,

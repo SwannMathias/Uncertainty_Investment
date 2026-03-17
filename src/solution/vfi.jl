@@ -426,12 +426,12 @@ Evaluate value function at arbitrary (K, D, sigma) using interpolation.
 - Interpolated value
 """
 function evaluate_value(sol::SolvedModel, K::Float64, D::Float64, sigma::Float64)
-    # Find D and sigma indices (nearest neighbor for discrete states)
-    log_D = log(D)
-    log_sigma = log(sigma)
+    # Convert level inputs to grid space (nearest neighbor for discrete states)
+    D_grid_val = sol.grids.sv.D_space == :log ? log(D) : D
+    sigma_grid_val = sol.grids.sv.sigma_space == :log ? log(sigma) : sigma
 
-    i_D = argmin(abs.(sol.grids.sv.D_grid .- log_D))
-    i_sigma = argmin(abs.(sol.grids.sv.sigma_grid .- log_sigma))
+    i_D = argmin(abs.(sol.grids.sv.D_grid .- D_grid_val))
+    i_sigma = argmin(abs.(sol.grids.sv.sigma_grid .- sigma_grid_val))
 
     # Interpolate on K
     return interpolate_value(sol.grids, sol.V, K, i_D, i_sigma)
@@ -443,11 +443,11 @@ end
 Evaluate policy function at arbitrary (K, D, sigma) using interpolation.
 """
 function evaluate_policy(sol::SolvedModel, K::Float64, D::Float64, sigma::Float64)
-    log_D = log(D)
-    log_sigma = log(sigma)
+    D_grid_val = sol.grids.sv.D_space == :log ? log(D) : D
+    sigma_grid_val = sol.grids.sv.sigma_space == :log ? log(sigma) : sigma
 
-    i_D = argmin(abs.(sol.grids.sv.D_grid .- log_D))
-    i_sigma = argmin(abs.(sol.grids.sv.sigma_grid .- log_sigma))
+    i_D = argmin(abs.(sol.grids.sv.D_grid .- D_grid_val))
+    i_sigma = argmin(abs.(sol.grids.sv.sigma_grid .- sigma_grid_val))
 
     return interpolate_policy(sol.grids, sol.I_policy, K, i_D, i_sigma)
 end
@@ -503,11 +503,12 @@ function interpolate_value_function(
     for i_sigma_fine in 1:grids_fine.n_sigma
         for i_D_fine in 1:grids_fine.n_D
             # Find nearest coarse grid indices for D and sigma (discrete states)
-            log_D_fine = get_log_D(grids_fine, i_D_fine)
-            log_sigma_fine = get_log_sigma(grids_fine, i_sigma_fine)
+            # Compare in native grid space (both grids use same space)
+            D_fine_val = grids_fine.sv.D_grid[i_D_fine]
+            sigma_fine_val = grids_fine.sv.sigma_grid[i_sigma_fine]
 
-            i_D_coarse = argmin(abs.(grids_coarse.sv.D_grid .- log_D_fine))
-            i_sigma_coarse = argmin(abs.(grids_coarse.sv.sigma_grid .- log_sigma_fine))
+            i_D_coarse = argmin(abs.(grids_coarse.sv.D_grid .- D_fine_val))
+            i_sigma_coarse = argmin(abs.(grids_coarse.sv.sigma_grid .- sigma_fine_val))
 
             # Extract coarse values at this (D, sigma) combination
             V_coarse_slice = V_coarse[:, i_D_coarse, i_sigma_coarse]

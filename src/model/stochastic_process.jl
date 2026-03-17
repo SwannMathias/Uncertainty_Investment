@@ -152,16 +152,38 @@ end
     SVDiscretization
 
 Joint discretization of demand and stochastic volatility processes.
+
+Grid values are stored in the process's native space (`:log` or `:level`),
+as indicated by `D_space` and `sigma_space`. Use `get_D_levels(sv)` and
+`get_sigma_levels(sv)` to obtain values in levels for profit computation.
 """
 struct SVDiscretization
-    D_grid::Vector{Float64}      # Log demand grid
-    sigma_grid::Vector{Float64}      # Log volatility grid
+    D_grid::Vector{Float64}      # Demand grid (in D_space)
+    sigma_grid::Vector{Float64}      # Volatility grid (in sigma_space)
+    D_space::Symbol              # :log or :level — space of D_grid values
+    sigma_space::Symbol          # :log or :level — space of sigma_grid values
     n_D::Int
     n_sigma::Int
     Pi_sigma::Matrix{Float64}         # Volatility transition P(sigma'|sigma)
     Pi_D_given_sigma::Array{Float64,3}  # Demand transition P(D'|D,sigma) for each sigma
     Pi_joint::Matrix{Float64}     # Joint transition on (D,sigma) pairs
 end
+
+"""
+    get_D_levels(sv::SVDiscretization) -> Vector{Float64}
+
+Get demand grid values in levels (for profit computation).
+Applies exp() when D_space is :log, returns grid directly when :level.
+"""
+get_D_levels(sv::SVDiscretization) = sv.D_space == :log ? exp.(sv.D_grid) : sv.D_grid
+
+"""
+    get_sigma_levels(sv::SVDiscretization) -> Vector{Float64}
+
+Get volatility grid values in levels (demand innovation std devs).
+Applies exp() when sigma_space is :log, returns grid directly when :level.
+"""
+get_sigma_levels(sv::SVDiscretization) = sv.sigma_space == :log ? exp.(sv.sigma_grid) : sv.sigma_grid
 
 """
     discretize_sv_process(demand::DemandProcess, vol::VolatilityProcess,
@@ -183,27 +205,25 @@ function discretize_sv_process(demand::DemandProcess, vol::VolatilityProcess,
                                n_D::Int, n_sigma::Int; method::Symbol=:rouwenhorst)
     @assert method in [:rouwenhorst, :tauchen] "Method must be :rouwenhorst or :tauchen"
 
+    discretize_fn = method == :rouwenhorst ? rouwenhorst : tauchen
+
     # 1. Discretize volatility process (independent)
-    if method == :rouwenhorst
-        sigma_grid, Pi_sigma = rouwenhorst(n_sigma, vol.rho_sigma, vol.sigma_eta; mu=vol.sigma_bar)
-    else
-        sigma_grid, Pi_sigma = tauchen(n_sigma, vol.rho_sigma, vol.sigma_eta; mu=vol.sigma_bar)
-    end
+    sigma_grid, Pi_sigma = discretize_fn(n_sigma, vol.rho_sigma, vol.sigma_eta; mu=vol.sigma_bar)
 
     # 2. Discretize demand process for each volatility level
     Pi_D_given_sigma = zeros(n_D, n_D, n_sigma)
     D_grids = Vector{Vector{Float64}}(undef, n_sigma)
 
     for i_sigma in 1:n_sigma
-        # Volatility level (in levels, not logs)
-        sigma_level = exp(sigma_grid[i_sigma])
+        # Get volatility level (demand innovation std dev)
+        if vol.process_space == :log
+            sigma_level = exp(sigma_grid[i_sigma])
+        else
+            sigma_level = max(sigma_grid[i_sigma], 1e-10)
+        end
 
         # Discretize demand with this volatility
-        if method == :rouwenhorst
-            D_grid_temp, Pi_D_temp = rouwenhorst(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
-        else
-            D_grid_temp, Pi_D_temp = tauchen(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
-        end
+        D_grid_temp, Pi_D_temp = discretize_fn(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
 
         D_grids[i_sigma] = D_grid_temp
         Pi_D_given_sigma[:, :, i_sigma] = Pi_D_temp
@@ -214,36 +234,94 @@ function discretize_sv_process(demand::DemandProcess, vol::VolatilityProcess,
 
     # 4. Handle correlation between shocks if rho_epsilon_eta ≠ 0
     if abs(vol.rho_epsilon_eta) > 1e-10
-        # Adjust transition probabilities for correlation
-        # This is a simplified approach; full bivariate normal would be more accurate
         @warn "Correlation rho_epsilon_eta = $(vol.rho_epsilon_eta) ≠ 0 detected. Using simplified correlation adjustment."
         # TODO: Implement proper bivariate discretization if needed
     end
 
     # 5. Construct joint transition matrix
-    # State space is (D, sigma) pairs, ordered as [(D_1,sigma_1), (D_2,sigma_1), ..., (D_n,sigma_1), (D_1,sigma_2), ...]
+    Pi_joint = _build_joint_transition(Pi_D_given_sigma, Pi_sigma, n_D, n_sigma)
+
+    return SVDiscretization(D_grid, sigma_grid, demand.process_space, vol.process_space,
+                           n_D, n_sigma, Pi_sigma, Pi_D_given_sigma, Pi_joint)
+end
+
+"""
+    discretize_sv_process(demand::DemandProcess, vol::TwoStateVolatility,
+                          n_D::Int, n_sigma::Int; method::Symbol=:rouwenhorst)
+
+Discretize demand process with two-state Markov switching volatility.
+The `n_sigma` argument is ignored (forced to 2).
+"""
+function discretize_sv_process(demand::DemandProcess, vol::TwoStateVolatility,
+                               n_D::Int, n_sigma::Int; method::Symbol=:rouwenhorst)
+    @assert method in [:rouwenhorst, :tauchen] "Method must be :rouwenhorst or :tauchen"
+
+    if n_sigma != 2
+        @warn "TwoStateVolatility forces n_sigma=2 (was $n_sigma in NumericalSettings)"
+    end
+
+    discretize_fn = method == :rouwenhorst ? rouwenhorst : tauchen
+
+    # Volatility grid and transitions are given directly
+    sigma_grid = vol.sigma_levels
+    Pi_sigma = vol.Pi_sigma
+    actual_n_sigma = 2
+
+    # Get volatility levels for demand discretization
+    if vol.process_space == :log
+        sigma_levels_for_demand = exp.(vol.sigma_levels)
+    else
+        sigma_levels_for_demand = vol.sigma_levels
+    end
+
+    # Discretize demand for each volatility state
+    Pi_D_given_sigma = zeros(n_D, n_D, actual_n_sigma)
+    D_grids = Vector{Vector{Float64}}(undef, actual_n_sigma)
+
+    for i_sigma in 1:actual_n_sigma
+        sigma_level = max(sigma_levels_for_demand[i_sigma], 1e-10)
+        D_grid_temp, Pi_D_temp = discretize_fn(n_D, demand.rho_D, sigma_level; mu=demand.mu_D)
+        D_grids[i_sigma] = D_grid_temp
+        Pi_D_given_sigma[:, :, i_sigma] = Pi_D_temp
+    end
+
+    # Average demand grid across volatility states
+    D_grid = mean(D_grids)
+
+    # Construct joint transition matrix
+    Pi_joint = _build_joint_transition(Pi_D_given_sigma, Pi_sigma, n_D, actual_n_sigma)
+
+    return SVDiscretization(D_grid, sigma_grid, demand.process_space, vol.process_space,
+                           n_D, actual_n_sigma, Pi_sigma, Pi_D_given_sigma, Pi_joint)
+end
+
+"""
+    _build_joint_transition(Pi_D_given_sigma, Pi_sigma, n_D, n_sigma) -> Matrix{Float64}
+
+Build joint transition matrix P(D',σ'|D,σ) = P(D'|D,σ) × P(σ'|σ).
+State ordering: [(D_1,σ_1), (D_2,σ_1), ..., (D_{n_D},σ_1), (D_1,σ_2), ...].
+"""
+function _build_joint_transition(Pi_D_given_sigma::Array{Float64,3},
+                                 Pi_sigma::Matrix{Float64},
+                                 n_D::Int, n_sigma::Int)
     n_states = n_D * n_sigma
     Pi_joint = zeros(n_states, n_states)
 
     for i_sigma in 1:n_sigma
         for i_D in 1:n_D
-            i_state = (i_sigma - 1) * n_D + i_D  # Current state index
+            i_state = (i_sigma - 1) * n_D + i_D
 
             for i_sigma_next in 1:n_sigma
                 for i_D_next in 1:n_D
                     i_state_next = (i_sigma_next - 1) * n_D + i_D_next
-
-                    # Joint probability: P(D',sigma'|D,sigma) = P(D'|D,sigma) * P(sigma'|sigma)
                     Pi_joint[i_state, i_state_next] = Pi_D_given_sigma[i_D, i_D_next, i_sigma] * Pi_sigma[i_sigma, i_sigma_next]
                 end
             end
         end
     end
 
-    # Verify transition matrix properties
     @assert all(isapprox.(sum(Pi_joint, dims=2), 1.0, atol=1e-10)) "Joint transition matrix rows must sum to 1"
-
-    return SVDiscretization(D_grid, sigma_grid, n_D, n_sigma, Pi_sigma, Pi_D_given_sigma, Pi_joint)
+    return Pi_joint
 end
 
 """
