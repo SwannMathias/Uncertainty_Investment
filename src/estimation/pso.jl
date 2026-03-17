@@ -212,8 +212,8 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
     # Create output directory
     mkpath(pso_config.output_dir)
 
-    # Initialize CSV log
-    log_file = joinpath(pso_config.output_dir, "pso_log.csv")
+    # Initialize optimization log
+    log_file = joinpath(pso_config.output_dir, "pso_log.log")
     open(log_file, "w") do io
         println(io, "iter,best_Q,F_begin,F_mid,phi_begin,phi_mid," *
                     "m1_sim,m2_sim,m3_sim,m4_sim,n_converged,iter_time")
@@ -355,7 +355,7 @@ function pso_optimize(config::SMMConfig, pso_config::PSOConfig;
                     iter_time)
         end
 
-        # Append to CSV log
+        # Append to log file
         open(log_file, "a") do io
             @printf(io, "%d,%.8e,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.2f\n",
                     iter, Q_global_best,

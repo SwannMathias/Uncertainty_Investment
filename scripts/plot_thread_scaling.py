@@ -25,13 +25,13 @@ if len(sys.argv) < 2:
     sys.exit(1)
 
 results_dir = sys.argv[1]
-merged_file = os.path.join(results_dir, "all_results.csv")
+merged_file = os.path.join(results_dir, "all_results.parquet")
 
 if not os.path.exists(merged_file):
     print(f"Error: {merged_file} not found")
     sys.exit(1)
 
-df = pd.read_csv(merged_file)
+df = pd.read_parquet(merged_file)
 print(f"Loaded {len(df)} observations")
 print(f"Thread counts: {sorted(df.n_threads.unique())}")
 print(f"Components: {df.component.unique()}")

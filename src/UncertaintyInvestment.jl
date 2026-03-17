@@ -37,7 +37,7 @@ using Distributions
 using Interpolations
 using Optim
 using NLsolve
-using CSV
+using Parquet2
 using DataFrames
 using JLD2
 using ProgressMeter
@@ -164,10 +164,10 @@ export condition_number, format_time, format_number
 
 include("utils/io.jl")
 export save_solution, load_solution
-export export_policy_to_csv, export_value_function_to_csv
+export export_policy_to_parquet, export_value_function_to_parquet
 export save_simulation, load_simulation
 export save_estimation_results, load_estimation_results
-export export_to_csv, create_output_directories
+export export_to_parquet, create_output_directories
 
 # ============================================================================
 # Package info

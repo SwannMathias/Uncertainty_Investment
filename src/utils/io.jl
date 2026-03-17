@@ -3,7 +3,7 @@ Input/output utilities for saving and loading model solutions and results.
 """
 
 using JLD2
-using CSV
+using Parquet2
 using DataFrames
 
 """
@@ -78,16 +78,16 @@ function load_solution(filename::String)
 end
 
 """
-    export_policy_to_csv(sol::SolvedModel, filename::String; subset_K=nothing)
+    export_policy_to_parquet(sol::SolvedModel, filename::String; subset_K=nothing)
 
-Export policy functions to CSV for analysis.
+Export policy functions to Parquet for analysis.
 
 # Arguments
 - `sol`: SolvedModel object
-- `filename`: Output CSV file path
+- `filename`: Output Parquet file path
 - `subset_K`: Optional vector of K indices to export (default: all)
 """
-function export_policy_to_csv(sol::SolvedModel, filename::String; subset_K=nothing)
+function export_policy_to_parquet(sol::SolvedModel, filename::String; subset_K=nothing)
     # Ensure directory exists
     dir = dirname(filename)
     if !isempty(dir) && !isdir(dir)
@@ -130,28 +130,28 @@ function export_policy_to_csv(sol::SolvedModel, filename::String; subset_K=nothi
     end
 
     df = DataFrame(rows)
-    CSV.write(filename, df)
+    Parquet2.writefile(filename, df)
 
     println("Policy functions exported to: $filename")
 end
 
 """
-    export_value_function_to_csv(sol::SolvedModel, filename::String)
+    export_value_function_to_parquet(sol::SolvedModel, filename::String)
 
-Export value function to CSV.
+Export value function to Parquet.
 """
-function export_value_function_to_csv(sol::SolvedModel, filename::String)
-    # Same as export_policy_to_csv but focuses on value function
-    export_policy_to_csv(sol, filename)
+function export_value_function_to_parquet(sol::SolvedModel, filename::String)
+    # Same as export_policy_to_parquet but focuses on value function
+    export_policy_to_parquet(sol, filename)
 end
 
 """
     save_simulation(filename::String, panel::FirmPanel)
 
-Save simulated firm panel to CSV.
+Save simulated firm panel to Parquet.
 
 # Arguments
-- `filename`: Output CSV file path
+- `filename`: Output Parquet file path
 - `panel`: FirmPanel object
 """
 function save_simulation(filename::String, panel::FirmPanel)
@@ -161,37 +161,37 @@ function save_simulation(filename::String, panel::FirmPanel)
         mkpath(dir)
     end
 
-    CSV.write(filename, panel.df)
+    Parquet2.writefile(filename, panel.df)
     println("Simulation saved to: $filename")
 end
 
 """
     load_simulation(filename::String) -> DataFrame
 
-Load simulated firm panel from CSV.
+Load simulated firm panel from Parquet.
 
 # Arguments
-- `filename`: Input CSV file path
+- `filename`: Input Parquet file path
 
 # Returns
 - DataFrame with simulation data
 """
 function load_simulation(filename::String)
     @assert isfile(filename) "File not found: $filename"
-    return CSV.read(filename, DataFrame)
+    return DataFrame(Parquet2.readfile(filename))
 end
 
 """
     save_estimation_results(filename::String, result::EstimationResult)
 
-Save GMM estimation results to CSV and JLD2.
+Save GMM estimation results to Parquet and JLD2.
 
 # Arguments
 - `filename`: Base output file path (without extension)
 - `result`: EstimationResult object
 
 Creates two files:
-- filename_summary.csv: Parameter estimates with standard errors
+- filename_summary.parquet: Parameter estimates with standard errors
 - filename_full.jld2: Full estimation results
 """
 function save_estimation_results(filename::String, result::EstimationResult)
@@ -201,15 +201,15 @@ function save_estimation_results(filename::String, result::EstimationResult)
         mkpath(dir)
     end
 
-    # Save summary to CSV
-    summary_file = filename * "_summary.csv"
+    # Save summary to Parquet
+    summary_file = filename * "_summary.parquet"
     df_summary = DataFrame(
         parameter = result.param_names,
         estimate = result.theta_hat,
         std_error = result.se,
         t_stat = result.theta_hat ./ result.se
     )
-    CSV.write(summary_file, df_summary)
+    Parquet2.writefile(summary_file, df_summary)
 
     # Save full results to JLD2
     full_file = filename * "_full.jld2"
@@ -259,39 +259,39 @@ function load_estimation_results(filename::String)
 end
 
 """
-    export_to_csv(sol::SolvedModel, output_dir::String)
+    export_to_parquet(sol::SolvedModel, output_dir::String)
 
-Export all model outputs to CSV files in specified directory.
+Export all model outputs to Parquet files in specified directory.
 
 Creates multiple files:
-- policy_functions.csv: Investment policies
-- value_function.csv: Value function
-- grids.csv: Grid information
+- policy_functions.parquet: Investment policies
+- grids.parquet: Grid information
+- demand_volatility_grids.parquet: Demand/volatility grid information
 
 # Arguments
 - `sol`: SolvedModel object
 - `output_dir`: Output directory path
 """
-function export_to_csv(sol::SolvedModel, output_dir::String)
+function export_to_parquet(sol::SolvedModel, output_dir::String)
     # Create output directory
     if !isdir(output_dir)
         mkpath(output_dir)
     end
 
     # Export policy functions
-    policy_file = joinpath(output_dir, "policy_functions.csv")
-    export_policy_to_csv(sol, policy_file)
+    policy_file = joinpath(output_dir, "policy_functions.parquet")
+    export_policy_to_parquet(sol, policy_file)
 
     # Export grids info
-    grids_file = joinpath(output_dir, "grids.csv")
+    grids_file = joinpath(output_dir, "grids.parquet")
     df_grids = DataFrame(
         i_K = 1:sol.grids.n_K,
         K = sol.grids.K_grid
     )
-    CSV.write(grids_file, df_grids)
+    Parquet2.writefile(grids_file, df_grids)
 
     # Export demand/volatility grids
-    dv_file = joinpath(output_dir, "demand_volatility_grids.csv")
+    dv_file = joinpath(output_dir, "demand_volatility_grids.parquet")
     df_dv = DataFrame(
         i_D = repeat(1:sol.grids.n_D, outer=sol.grids.n_sigma),
         i_sigma = repeat(1:sol.grids.n_sigma, inner=sol.grids.n_D),
@@ -300,7 +300,7 @@ function export_to_csv(sol::SolvedModel, output_dir::String)
         D = exp.(repeat(sol.grids.sv.D_grid, outer=sol.grids.n_sigma)),
         sigma = exp.(repeat(sol.grids.sv.sigma_grid, inner=sol.grids.n_D))
     )
-    CSV.write(dv_file, df_dv)
+    Parquet2.writefile(dv_file, df_dv)
 
     println("All outputs exported to: $output_dir")
 end

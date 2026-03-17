@@ -7,7 +7,7 @@ using Printf
 using NPZ
 using Distributed
 using DataFrames
-using CSV
+using Parquet2
 
 using Random
 
@@ -114,7 +114,7 @@ if test
     all_panels = FirmPanel(all_panels_df, total_firms, T_years)
     
     # Save using the proper function
-    save_simulation(joinpath(outdir, "panel_all_fixed_costs.csv"), all_panels)
+    save_simulation(joinpath(outdir, "panel_all_fixed_costs.parquet"), all_panels)
     
     println("Saved combined panel with $(nrow(all_panels_df)) observations")
     println("Fixed cost values: $(unique(all_panels_df.F_mid_year))")

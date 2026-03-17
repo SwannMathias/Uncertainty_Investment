@@ -101,7 +101,7 @@ if test
         T_years = 100
     )
     panel = construct_estimation_panel(histories)
-    save_simulation("output/simulations_uncertainty_fixed_cost/panel_data_s11.csv", panel)
+    save_simulation("output/simulations_uncertainty_fixed_cost/panel_data_s11.parquet", panel)
     NPZ.npzwrite("output/simulations_uncertainty_fixed_cost/I_policy_s11.npy",sol_scenario1.I_policy)
     NPZ.npzwrite("output/simulations_uncertainty_fixed_cost/Delta_I_policy_s11.npy",sol_scenario1.Delta_I_policy)
 
@@ -152,7 +152,7 @@ if test
         T_years = 100
     )
     panel = construct_estimation_panel(histories)
-    save_simulation("output/simulations_uncertainty_fixed_cost/panel_data_s12.csv", panel)
+    save_simulation("output/simulations_uncertainty_fixed_cost/panel_data_s12.parquet", panel)
     NPZ.npzwrite("output/simulations_uncertainty_fixed_cost/I_policy_s12.npy",sol_scenario1.I_policy)
     NPZ.npzwrite("output/simulations_uncertainty_fixed_cost/Delta_I_policy_s12.npy",sol_scenario1.Delta_I_policy)
 
