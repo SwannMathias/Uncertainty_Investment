@@ -127,6 +127,9 @@ include("simulation/panel.jl")
 export FirmPanel, construct_estimation_panel
 export panel_summary_statistics, print_panel_summary
 
+include("model/irf_shocks.jl")
+export generate_irf_panels, year_to_semester
+
 # ============================================================================
 # Estimation
 # ============================================================================
