@@ -56,9 +56,12 @@ Generate matched control/treatment shock panels with two-state Markov volatility
 - `shock_semester`: semester index (1-based, post burn-in) at which to impose the impulse
 - `seed`: master seed for reproducibility
 - `burn_in`: periods to discard before the panel starts
-- `mean_preserving`: if `true` and demand is in log space, apply Jensen's inequality
-  correction `-σ²_t/2` to the log-demand drift each period, ensuring E[D_level] is
-  unaffected by volatility changes. Default: `false`.
+- `mean_preserving`: if `true` and demand is in log space, apply a **differential**
+  Jensen's inequality correction `-0.5*(σ²_treat - σ²_control)` to the treatment
+  log-demand drift only.  The control path is left unchanged.  This neutralises the
+  level effect of the treatment's excess volatility without altering the unconditional
+  distribution of demand.  The correction fades naturally as the volatility shock
+  mean-reverts.  Default: `false`.
 
 # Returns
 NamedTuple `(control=ShockPanel, treatment=ShockPanel)`
@@ -138,11 +141,13 @@ function generate_irf_panels(
             sig_c = max(sig_levels_for_D[state_c], 1e-10)
             sig_t = max(sig_levels_for_D[state_t], 1e-10)
 
-            # Jensen's inequality correction: -σ²/2 ensures E[exp(σε - σ²/2)] = 1
-            jc_c = apply_jensen ? -0.5 * sig_c^2 : 0.0
-            jc_t = apply_jensen ? -0.5 * sig_t^2 : 0.0
+            # Differential Jensen correction: only neutralise the level effect of the
+            # treatment's excess volatility.  Control path is left unchanged so the
+            # unconditional distribution of D is unaffected.  The correction fades
+            # naturally as σ_treat → σ_control after the shock.
+            jc_t = apply_jensen ? -0.5 * (sig_t^2 - sig_c^2) : 0.0
 
-            Dc[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dc[t-1] + jc_c + sig_c * eps_D[t]
+            Dc[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dc[t-1] + sig_c * eps_D[t]
             Dt[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dt[t-1] + jc_t + sig_t * eps_D[t]
         end
 
@@ -193,9 +198,12 @@ Control σ evolves normally. Before the shock, both paths are identical.
 - `sigma_shock_value`: forced σ value **in native space** (log if vol.process_space == :log).
   E.g., for a VolatilityProcess with process_space = :log and you want σ_level = 0.20,
   pass `log(0.20)`.
-- `mean_preserving`: if `true` and demand is in log space, apply Jensen's inequality
-  correction `-σ²_t/2` to the log-demand drift each period, ensuring E[D_level] is
-  unaffected by volatility changes. Default: `false`.
+- `mean_preserving`: if `true` and demand is in log space, apply a **differential**
+  Jensen's inequality correction `-0.5*(σ²_treat - σ²_control)` to the treatment
+  log-demand drift only.  The control path is left unchanged.  This neutralises the
+  level effect of the treatment's excess volatility without altering the unconditional
+  distribution of demand.  The correction fades naturally as the volatility shock
+  mean-reverts.  Default: `false`.
 """
 function generate_irf_panels(
     demand::DemandProcess,
@@ -261,11 +269,13 @@ function generate_irf_panels(
             sig_level_c = sigma_space == :log ? exp(sc[t]) : max(sc[t], 1e-10)
             sig_level_t = sigma_space == :log ? exp(st[t]) : max(st[t], 1e-10)
 
-            # Jensen's inequality correction: -σ²/2 ensures E[exp(σε - σ²/2)] = 1
-            jc_c = apply_jensen ? -0.5 * sig_level_c^2 : 0.0
-            jc_t = apply_jensen ? -0.5 * sig_level_t^2 : 0.0
+            # Differential Jensen correction: only neutralise the level effect of the
+            # treatment's excess volatility.  Control path is left unchanged so the
+            # unconditional distribution of D is unaffected.  The correction fades
+            # naturally as σ_treat → σ_control after the shock.
+            jc_t = apply_jensen ? -0.5 * (sig_level_t^2 - sig_level_c^2) : 0.0
 
-            Dc[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dc[t-1] + jc_c + sig_level_c * eps_D[t]
+            Dc[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dc[t-1] + sig_level_c * eps_D[t]
             Dt[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dt[t-1] + jc_t + sig_level_t * eps_D[t]
         end
 
