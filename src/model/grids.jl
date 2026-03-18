@@ -160,7 +160,7 @@ function construct_grids(params::ModelParameters)
 
     return StateGrids(
         K_grid, n_K, K_min, K_max,
-        sv, params.numerical.n_D, params.numerical.n_sigma,
+        sv, sv.n_D, sv.n_sigma,
         Pi_semester, Pi_year,
         n_states,
         precomputed_profits

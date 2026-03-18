@@ -41,7 +41,7 @@ calibration = FixedCalibration(
     beta    = 0.96,      # Annual discount factor
 
     # Demand process (semester frequency)
-    mu_D  = 0.0,         # Long-run mean of log demand
+    mu_D  = log(500),         # Long-run mean of log demand
     rho_D = 0.5,         # Demand persistence
 
     # Volatility process (semester frequency, continuous AR(1))
@@ -52,13 +52,13 @@ calibration = FixedCalibration(
 
     # Numerical settings for VFI
     n_K          = 50,
-    n_D          = 15,
-    n_sigma      = 7,
+    n_D          = 50,
+    n_sigma      = 5,
     K_min_factor = 0.1,
     K_max_factor = 3.0,
     tol_vfi      = 1e-6,
     max_iter     = 1000,
-    howard_steps = 50,
+    howard_steps = 0,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -70,7 +70,7 @@ calibration = FixedCalibration(
 
 true_cost_params = Dict{Symbol,Float64}(
     :F_begin   => 0.5,    # Fixed cost at beginning of year
-    :F_mid     => 0.3,    # Fixed cost at mid-year
+    :F_mid     => 0.8,    # Fixed cost at mid-year
     :phi_begin => 2.0,    # Convex cost parameter at beginning of year
     :phi_mid   => 1.5,    # Convex cost parameter at mid-year
 )
@@ -130,9 +130,9 @@ println()
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Simulation settings (shared with SMM estimation for consistency)
-sim_n_firms       = 1000
-sim_T_years       = 50
-sim_burn_in_years = 30
+sim_n_firms       = 100
+sim_T_years       = 500
+sim_burn_in_years = 300
 sim_shock_seed    = 42
 sim_transform     = ASINH_TRANSFORM
 sim_zero_threshold = 1e-4
@@ -200,7 +200,7 @@ end
 #   :fixed_only  — fix phi at true values, estimate F_begin and F_mid
 #   :custom      — manually specify estimated_params, fixed_params, and moments below
 
-estimation_mode = :composite
+estimation_mode = :convex_only
 
 if estimation_mode == :composite
     # Estimate all 4 parameters, match all 4 moments
