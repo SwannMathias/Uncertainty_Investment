@@ -34,7 +34,8 @@ using Random: MersenneTwister
 """
     generate_irf_panels(demand::DemandProcess, vol::TwoStateVolatility,
                         n_firms, T_semesters;
-                        shock_semester, seed=42, burn_in=100)
+                        shock_semester, seed=42, burn_in=100,
+                        mean_preserving=:none)
 
 Generate matched control/treatment shock panels with two-state Markov volatility.
 
@@ -56,9 +57,13 @@ Generate matched control/treatment shock panels with two-state Markov volatility
 - `shock_semester`: semester index (1-based, post burn-in) at which to impose the impulse
 - `seed`: master seed for reproducibility
 - `burn_in`: periods to discard before the panel starts
-- `mean_preserving`: if `true` and demand is in log space, apply Jensen's inequality
-  correction `-σ²_t/2` to the log-demand drift each period, ensuring E[D_level] is
-  unaffected by volatility changes. Default: `false`.
+- `mean_preserving`: Jensen's inequality correction mode for log-demand drift.
+  Only effective when `demand.process_space == :log`. Options:
+  - `:none` (default) — no correction
+  - `:static` — apply differential correction `-0.5*(σ²_treatment - σ²_control)`
+    to the treatment path at the shock semester only
+  - `:dynamic` — apply the same differential correction to the treatment path
+    every semester from the shock onward
 
 # Returns
 NamedTuple `(control=ShockPanel, treatment=ShockPanel)`
@@ -71,12 +76,13 @@ function generate_irf_panels(
     shock_semester::Int,
     seed::Int = 42,
     burn_in::Int = 100,
-    mean_preserving::Bool = false
+    mean_preserving::Symbol = :none
 )
     @assert 1 <= shock_semester <= T_semesters "shock_semester must be in [1, $T_semesters]"
+    @assert mean_preserving in (:none, :static, :dynamic) "mean_preserving must be :none, :static, or :dynamic"
 
-    if mean_preserving && demand.process_space != :log
-        @warn "mean_preserving=true has no effect when demand.process_space = :$(demand.process_space). " *
+    if mean_preserving != :none && demand.process_space != :log
+        @warn "mean_preserving=:$(mean_preserving) has no effect when demand.process_space = :$(demand.process_space). " *
               "Jensen's inequality correction only applies in log space."
     end
 
@@ -96,7 +102,7 @@ function generate_irf_panels(
     D_trt    = zeros(n_firms, T_semesters)
     sig_trt  = zeros(n_firms, T_semesters)
 
-    apply_jensen = mean_preserving && D_space == :log
+    can_jensen = mean_preserving != :none && D_space == :log
     n_already_high = 0  # diagnostic counter
 
     for i in 1:n_firms
@@ -138,11 +144,15 @@ function generate_irf_panels(
             sig_c = max(sig_levels_for_D[state_c], 1e-10)
             sig_t = max(sig_levels_for_D[state_t], 1e-10)
 
-            # Jensen's inequality correction: -σ²/2 ensures E[exp(σε - σ²/2)] = 1
-            jc_c = apply_jensen ? -0.5 * sig_c^2 : 0.0
-            jc_t = apply_jensen ? -0.5 * sig_t^2 : 0.0
+            # Differential Jensen's correction: -0.5*(σ²_t - σ²_c) on treatment only
+            # Corrects only the excess variance from the shock, not the baseline
+            apply_correction = can_jensen && (
+                (mean_preserving == :dynamic && t_post >= shock_semester) ||
+                (mean_preserving == :static  && t_post == shock_semester)
+            )
+            jc_t = apply_correction ? -0.5 * (sig_t^2 - sig_c^2) : 0.0
 
-            Dc[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dc[t-1] + jc_c + sig_c * eps_D[t]
+            Dc[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dc[t-1] + sig_c * eps_D[t]
             Dt[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dt[t-1] + jc_t + sig_t * eps_D[t]
         end
 
@@ -193,9 +203,13 @@ Control σ evolves normally. Before the shock, both paths are identical.
 - `sigma_shock_value`: forced σ value **in native space** (log if vol.process_space == :log).
   E.g., for a VolatilityProcess with process_space = :log and you want σ_level = 0.20,
   pass `log(0.20)`.
-- `mean_preserving`: if `true` and demand is in log space, apply Jensen's inequality
-  correction `-σ²_t/2` to the log-demand drift each period, ensuring E[D_level] is
-  unaffected by volatility changes. Default: `false`.
+- `mean_preserving`: Jensen's inequality correction mode for log-demand drift.
+  Only effective when `demand.process_space == :log`. Options:
+  - `:none` (default) — no correction
+  - `:static` — apply differential correction `-0.5*(σ²_treatment - σ²_control)`
+    to the treatment path at the shock semester only
+  - `:dynamic` — apply the same differential correction to the treatment path
+    every semester from the shock onward
 """
 function generate_irf_panels(
     demand::DemandProcess,
@@ -206,19 +220,20 @@ function generate_irf_panels(
     sigma_shock_value::Float64,
     seed::Int = 42,
     burn_in::Int = 100,
-    mean_preserving::Bool = false
+    mean_preserving::Symbol = :none
 )
     @assert 1 <= shock_semester <= T_semesters "shock_semester must be in [1, $T_semesters]"
+    @assert mean_preserving in (:none, :static, :dynamic) "mean_preserving must be :none, :static, or :dynamic"
 
-    if mean_preserving && demand.process_space != :log
-        @warn "mean_preserving=true has no effect when demand.process_space = :$(demand.process_space). " *
+    if mean_preserving != :none && demand.process_space != :log
+        @warn "mean_preserving=:$(mean_preserving) has no effect when demand.process_space = :$(demand.process_space). " *
               "Jensen's inequality correction only applies in log space."
     end
 
     T_total = T_semesters + burn_in
     D_space     = demand.process_space
     sigma_space = vol.process_space
-    apply_jensen = mean_preserving && D_space == :log
+    can_jensen = mean_preserving != :none && D_space == :log
 
     D_ctrl   = zeros(n_firms, T_semesters)
     sig_ctrl = zeros(n_firms, T_semesters)
@@ -261,11 +276,14 @@ function generate_irf_panels(
             sig_level_c = sigma_space == :log ? exp(sc[t]) : max(sc[t], 1e-10)
             sig_level_t = sigma_space == :log ? exp(st[t]) : max(st[t], 1e-10)
 
-            # Jensen's inequality correction: -σ²/2 ensures E[exp(σε - σ²/2)] = 1
-            jc_c = apply_jensen ? -0.5 * sig_level_c^2 : 0.0
-            jc_t = apply_jensen ? -0.5 * sig_level_t^2 : 0.0
+            # Differential Jensen's correction: -0.5*(σ²_t - σ²_c) on treatment only
+            apply_correction = can_jensen && (
+                (mean_preserving == :dynamic && t_post >= shock_semester) ||
+                (mean_preserving == :static  && t_post == shock_semester)
+            )
+            jc_t = apply_correction ? -0.5 * (sig_level_t^2 - sig_level_c^2) : 0.0
 
-            Dc[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dc[t-1] + jc_c + sig_level_c * eps_D[t]
+            Dc[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dc[t-1] + sig_level_c * eps_D[t]
             Dt[t] = demand.mu_D * (1 - demand.rho_D) + demand.rho_D * Dt[t-1] + jc_t + sig_level_t * eps_D[t]
         end
 
