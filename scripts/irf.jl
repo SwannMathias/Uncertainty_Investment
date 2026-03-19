@@ -23,6 +23,7 @@ mkpath(outdir)
 
 Random.seed!(12345)
 
+
 # ============================================================================
 # Configuration: choose demand space, volatility type, and cost structure
 # ============================================================================
@@ -54,7 +55,7 @@ volatility_continuous = VolatilityProcess(
 vol_two_state_space = :level
 
 volatility_two_state = TwoStateVolatility(
-    sigma_levels = [0.05, 0.20],
+    sigma_levels = [0.05, 1],
     Pi_sigma = [0.95 0.05; 0.10 0.90],
     process_space = vol_two_state_space
 )
@@ -87,11 +88,11 @@ params = ModelParameters(
 )
 
 # --- Adjustment costs ---
-ac_begin = FixedAdjustmentCost(F = 1.0)
+ac_begin = CompositeAdjustmentCost(FixedAdjustmentCost(F=1.0), ConvexAdjustmentCost(phi=1))
 ac_mid_year = FixedAdjustmentCost(F = 100.0)
 
 # --- IRF settings ---
-n_firms      = 100
+n_firms      = 1000
 T_years      = 500
 T_semesters  = 2 * T_years
 T_shock_year = 300      # shock hits at the beginning of year 50
@@ -241,7 +242,7 @@ end
 
 combined_df = vcat(all_panels...)
 combined_panel = FirmPanel(combined_df, n_firms, T_years)
-save_simulation(joinpath(outdir, "panel_combined.parquet"), combined_panel)
+save_simulation(joinpath(outdir, "panel.parquet"), combined_panel)
 
 println("\n" * "="^70)
 println("IRF outputs saved to: $outdir")
