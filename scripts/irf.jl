@@ -9,6 +9,13 @@ using DataFrames
 using Parquet2
 using Random
 
+# ============================================================================
+# Global toggles
+# ============================================================================
+
+# Set to true to compute conditional expectation columns (E_last_semester,
+# E_beginning, E_half). These are slow due to O(n_states^2) loops per firm-year.
+COMPUTE_PLANS = false
 
 project_root = dirname(@__DIR__)
 outdir = joinpath(project_root, "output", "simulations_irf")
@@ -133,99 +140,116 @@ NPZ.npzwrite(joinpath(outdir, "I_policy.npy"), sol.I_policy)
 NPZ.npzwrite(joinpath(outdir, "Delta_I_policy.npy"), sol.Delta_I_policy)
 
 # ============================================================================
-# Generate IRF shock panels (Bloom 2009 protocol)
+# Generate IRF shock panels (Bloom 2009 protocol) for all treatments
 # ============================================================================
 
 shock_sem = year_to_semester(T_shock_year; stage = :begin)
 
 println("\nGenerating IRF panels (Bloom 2009 protocol)...")
 println("  Shock semester: $shock_sem (beginning of year $T_shock_year)")
+println("  COMPUTE_PLANS: $COMPUTE_PLANS")
 
-if volatility isa TwoStateVolatility
-    println("  Forcing σ to σ_high = $(volatility.sigma_levels[2]) at shock date")
-    panels = generate_irf_panels(
-        params.demand,
-        params.volatility,
-        n_firms,
-        T_semesters;
-        shock_semester = shock_sem,
-        seed = seed,
-        burn_in = 100
-    )
-elseif volatility isa VolatilityProcess
-    # For continuous AR(1): shock to 2× the long-run mean level
+# Precompute sigma_shock for continuous volatility (used across all treatments)
+sigma_shock = NaN
+if volatility isa VolatilityProcess
     if vol_space == :log
         sigma_shock = log(2.0 * exp(volatility.sigma_bar))
     else
         sigma_shock = 2.0 * volatility.sigma_bar
     end
-    println("  Forcing σ to $(sigma_shock) ($vol_space space) at shock date")
-    panels = generate_irf_panels(
-        params.demand,
-        params.volatility,
-        n_firms,
-        T_semesters;
-        shock_semester = shock_sem,
-        sigma_shock_value = sigma_shock,
-        seed = seed,
-        burn_in = 100
-    )
 end
 
-# Sanity checks
-ctrl_sig = panels.control.sigma
-trt_sig  = panels.treatment.sigma
+# --- Loop over mean-preserving correction treatments ---
+treatments = [:none, :static, :dynamic]
+all_panels = DataFrame[]
 
-# Before shock: paths should be identical
-@assert ctrl_sig[:, 1:shock_sem-1] == trt_sig[:, 1:shock_sem-1] "Paths should match before shock"
-println("  ✓ Control and treatment paths identical before shock")
+for trt in treatments
+    println("\n" * "-"^70)
+    println("Treatment: $trt")
+    println("-"^70)
 
-# At shock: all treatment firms at σ_high
-if volatility isa TwoStateVolatility
-    @assert all(trt_sig[:, shock_sem] .== volatility.sigma_levels[2]) "Treatment σ should be σ_high at shock"
+    if volatility isa TwoStateVolatility
+        println("  Forcing σ to σ_high = $(volatility.sigma_levels[2]) at shock date")
+        panels = generate_irf_panels(
+            params.demand,
+            params.volatility,
+            n_firms,
+            T_semesters;
+            shock_semester = shock_sem,
+            seed = seed,
+            burn_in = 100,
+            mean_preserving = trt
+        )
+    elseif volatility isa VolatilityProcess
+        println("  Forcing σ to $(sigma_shock) ($vol_space space) at shock date")
+        panels = generate_irf_panels(
+            params.demand,
+            params.volatility,
+            n_firms,
+            T_semesters;
+            shock_semester = shock_sem,
+            sigma_shock_value = sigma_shock,
+            seed = seed,
+            burn_in = 100,
+            mean_preserving = trt
+        )
+    end
+
+    # Sanity checks
+    ctrl_sig = panels.control.sigma
+    trt_sig  = panels.treatment.sigma
+
+    @assert ctrl_sig[:, 1:shock_sem-1] == trt_sig[:, 1:shock_sem-1] "Paths should match before shock"
+    println("  Control and treatment paths identical before shock")
+
+    if volatility isa TwoStateVolatility
+        @assert all(trt_sig[:, shock_sem] .== volatility.sigma_levels[2]) "Treatment σ should be σ_high at shock"
+    end
+    println("  Treatment σ forced at shock semester")
+
+    n_diverged = sum(ctrl_sig[:, shock_sem] .!= trt_sig[:, shock_sem])
+    println("  $n_diverged / $n_firms firms have different σ at shock date")
+
+    # Simulate control and treatment panels
+    println("  Simulating control panel...")
+    hist_ctrl = simulate_firm_panel(sol, panels.control;
+        K_init = nothing, T_years = T_years, use_parallel = true, compute_plans = COMPUTE_PLANS)
+    panel_ctrl = construct_estimation_panel(hist_ctrl)
+    panel_ctrl.df[!, :treatment] .= String(trt)
+    panel_ctrl.df[!, :group] .= "control"
+
+    println("  Simulating treatment panel...")
+    hist_trt = simulate_firm_panel(sol, panels.treatment;
+        K_init = nothing, T_years = T_years, use_parallel = true, compute_plans = COMPUTE_PLANS)
+    panel_trt = construct_estimation_panel(hist_trt)
+    panel_trt.df[!, :treatment] .= String(trt)
+    panel_trt.df[!, :group] .= "treatment"
+
+    push!(all_panels, panel_ctrl.df)
+    push!(all_panels, panel_trt.df)
+
+    # Save raw σ and D paths per treatment
+    NPZ.npzwrite(joinpath(outdir, "sigma_control_$(trt).npy"),   panels.control.sigma_level)
+    NPZ.npzwrite(joinpath(outdir, "sigma_treatment_$(trt).npy"), panels.treatment.sigma_level)
+    NPZ.npzwrite(joinpath(outdir, "D_control_$(trt).npy"),       panels.control.D_level)
+    NPZ.npzwrite(joinpath(outdir, "D_treatment_$(trt).npy"),     panels.treatment.D_level)
 end
-println("  ✓ Treatment σ forced at shock semester")
-
-# After shock: paths diverge
-n_diverged = sum(ctrl_sig[:, shock_sem] .!= trt_sig[:, shock_sem])
-println("  ✓ $n_diverged / $n_firms firms have different σ at shock date (rest were already at σ_high)")
 
 # ============================================================================
-# Simulate firms under both scenarios
+# Stack and save combined panel
 # ============================================================================
 
-println("\nSimulating control panel ($n_firms firms, $T_years years)...")
-hist_ctrl = simulate_firm_panel(sol, panels.control;
-    K_init = nothing, T_years = T_years, use_parallel = true)
-panel_ctrl = construct_estimation_panel(hist_ctrl)
-
-println("Simulating treatment panel ($n_firms firms, $T_years years)...")
-hist_trt = simulate_firm_panel(sol, panels.treatment;
-    K_init = nothing, T_years = T_years, use_parallel = true)
-panel_trt = construct_estimation_panel(hist_trt)
-
-# ============================================================================
-# Save everything
-# ============================================================================
-
-save_simulation(joinpath(outdir, "panel_control.parquet"), panel_ctrl)
-save_simulation(joinpath(outdir, "panel_treatment.parquet"), panel_trt)
-
-# Save raw σ paths for plotting the IRF on σ itself
-NPZ.npzwrite(joinpath(outdir, "sigma_control.npy"),  panels.control.sigma_level)
-NPZ.npzwrite(joinpath(outdir, "sigma_treatment.npy"), panels.treatment.sigma_level)
-NPZ.npzwrite(joinpath(outdir, "D_control.npy"),  panels.control.D_level)
-NPZ.npzwrite(joinpath(outdir, "D_treatment.npy"), panels.treatment.D_level)
+combined_df = vcat(all_panels...)
+combined_panel = FirmPanel(combined_df, n_firms, T_years)
+save_simulation(joinpath(outdir, "panel_combined.parquet"), combined_panel)
 
 println("\n" * "="^70)
 println("IRF outputs saved to: $outdir")
-println("  panel_control.parquet    — firm panel under baseline shocks")
-println("  panel_treatment.parquet  — firm panel with σ shock at year $T_shock_year")
-println("  sigma_control.npy        — σ_level paths, shape (n_firms, T_semesters)")
-println("  sigma_treatment.npy      — σ_level paths with impulse")
-println("  D_control.npy            — D_level paths (control)")
-println("  D_treatment.npy          — D_level paths (treatment)")
+println("  panel_combined.parquet   — all treatments (none/static/dynamic) × control/treatment")
+println("  sigma_*_<trt>.npy        — σ_level paths per treatment, shape (n_firms, T_semesters)")
+println("  D_*_<trt>.npy            — D_level paths per treatment")
 println("="^70)
 println("\nTo compute the IRF:")
 println("  IRF(t) = mean(Y_treatment(t)) - mean(Y_control(t))")
 println("  for Y ∈ {I_total, I_rate, K, profit, ...}")
+println("  Filter by 'treatment' column for specific correction type")

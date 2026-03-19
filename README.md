@@ -585,6 +585,49 @@ sol = solve_model(params; verbose=true)
 println("Threads used: $(sol.convergence.threads_used)")
 ```
  
+## Impulse Response Functions (IRF)
+
+The package implements the Bloom (2009, Econometrica) IRF protocol for analyzing the effect of uncertainty shocks on firm investment. See `scripts/irf.jl`.
+
+### Mean-Preserving Spread Correction (Jensen's Inequality)
+
+When demand evolves in log space, a volatility shock mechanically affects the expected *level* of demand via Jensen's inequality: `E[exp(log D)] != exp(E[log D])` when variance changes. To isolate the pure uncertainty channel from this first-moment effect, the IRF generator supports three correction modes via the `mean_preserving` argument:
+
+| Mode | Description |
+|------|-------------|
+| `:none` | No correction. The raw IRF captures both the uncertainty effect and the mechanical first-moment effect of the variance shock. |
+| `:static` | Apply the differential correction at the shock semester only. Corrects the one-time drift shift caused by the variance shock at impact. |
+| `:dynamic` | Apply the differential correction every semester from the shock onward. Tracks the evolving variance gap as treatment and control paths reconverge. |
+
+**Correction formula** (applied to treatment path only):
+
+```
+jc_t = -0.5 * (sigma_treatment^2 - sigma_control^2)
+```
+
+This *differential* formulation corrects only the **excess** variance introduced by the shock, not the baseline variance shared by both control and treatment. The control path never receives any correction (`jc_c = 0`).
+
+**Key properties:**
+- Before the shock: `sigma_treatment == sigma_control`, so `jc_t = 0` (no correction needed)
+- At/after the shock: correction = `-0.5 * (sigma_trt^2 - sigma_ctrl^2)`, removing the mechanical drift effect
+- As paths reconverge: the correction naturally decays to zero (for `:dynamic` mode)
+- Only active when `demand.process_space == :log`
+
+**Usage:**
+
+```julia
+# No correction (default)
+panels = generate_irf_panels(demand, vol, n_firms, T; shock_semester=s, mean_preserving=:none)
+
+# Static correction (shock semester only)
+panels = generate_irf_panels(demand, vol, n_firms, T; shock_semester=s, mean_preserving=:static)
+
+# Dynamic correction (every semester from shock onward)
+panels = generate_irf_panels(demand, vol, n_firms, T; shock_semester=s, mean_preserving=:dynamic)
+```
+
+The `scripts/irf.jl` script loops over all three treatments and produces a combined panel (`panel_combined.parquet`) with a `treatment` column identifying the correction mode and a `group` column distinguishing control from treatment.
+
 ## Performance Tips
  
 1. **Grid Size**: Start with smaller grids (n_K=50, n_D=10, n_sigma=5) for testing
